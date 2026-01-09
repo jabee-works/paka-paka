@@ -1,0 +1,874 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>paka-paka | 匿名雑談チャット</title>
+
+    <!-- ★修正: PocketBaseをここで確実に読み込む -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pocketbase/0.21.1/pocketbase.umd.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+
+    <!-- アイコン設定 -->
+    <link rel="icon" href="icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="icon.svg">
+
+    <!-- PWA設定 -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#4f46e5">
+
+    <style>
+        .scrollbar-hide::-webkit-scrollbar {
+            display: none;
+        }
+
+        .scrollbar-hide {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+
+        [v-cloak] {
+            display: none;
+        }
+
+        /* アニメーション */
+        .page-enter-active,
+        .page-leave-active {
+            transition: opacity 0.2s ease, transform 0.2s ease;
+        }
+
+        .page-enter-from {
+            opacity: 0;
+            transform: translateY(5px);
+        }
+
+        .page-leave-to {
+            opacity: 0;
+            transform: translateY(-5px);
+        }
+
+        .fade-enter-active,
+        .fade-leave-active {
+            transition: opacity 0.3s;
+        }
+
+        .fade-enter-from,
+        .fade-leave-to {
+            opacity: 0;
+        }
+
+        .notification-enter-active,
+        .notification-leave-active {
+            transition: all 0.3s ease;
+        }
+
+        .notification-enter-from,
+        .notification-leave-to {
+            opacity: 0;
+            transform: translateY(-20px);
+        }
+
+        .zoom-enter-active,
+        .zoom-leave-active {
+            transition: transform 0.2s, opacity 0.2s;
+        }
+
+        .zoom-enter-from,
+        .zoom-leave-to {
+            transform: scale(0.9);
+            opacity: 0;
+        }
+
+        .toggle-checkbox:checked {
+            right: 0;
+            border-color: #68D391;
+        }
+
+        .toggle-checkbox:checked+.toggle-label {
+            background-color: #68D391;
+        }
+    </style>
+</head>
+
+<body
+    class="bg-gray-100 md:bg-gray-200 text-gray-800 font-sans fixed inset-0 overflow-hidden flex flex-col md:items-center md:justify-center transition-colors duration-500">
+
+    <div id="app" v-cloak
+        class="w-full h-full bg-white relative flex flex-col md:flex-row md:max-w-5xl md:h-[90vh] md:rounded-2xl md:shadow-2xl md:overflow-hidden transition-all duration-300">
+
+        <!-- サイドバー -->
+        <aside class="hidden md:flex flex-col w-64 text-white flex-shrink-0 z-20 transition-colors duration-300"
+            :class="theme.sidebar">
+            <div class="p-6 font-bold text-xl tracking-wider flex items-center gap-2">
+                <span>🐴</span> paka-paka (PB版)
+            </div>
+            <nav class="flex-1 px-4 space-y-2">
+                <button @click="handleTabClick('board')"
+                    class="w-full text-left px-4 py-3 rounded-xl transition-all flex items-center gap-3"
+                    :class="activeTab === 'board' ? 'bg-white/20 shadow-md font-bold' : 'hover:bg-white/10 text-white/80'">
+                    <span>📋</span> 掲示板
+                </button>
+                <button @click="handleTabClick('rooms')"
+                    class="w-full text-left px-4 py-3 rounded-xl transition-all flex items-center gap-3 relative"
+                    :class="activeTab === 'rooms' ? 'bg-white/20 shadow-md font-bold' : 'hover:bg-white/10 text-white/80'">
+                    <span>🏠</span> 部屋
+                    <span v-if="currentRoom"
+                        class="absolute right-4 w-2.5 h-2.5 bg-green-400 rounded-full animate-pulse border border-white"></span>
+                </button>
+                <button @click="handleTabClick('profile')"
+                    class="w-full text-left px-4 py-3 rounded-xl transition-all flex items-center gap-3"
+                    :class="activeTab === 'profile' ? 'bg-white/20 shadow-md font-bold' : 'hover:bg-white/10 text-white/80'">
+                    <span>👤</span> プロフィール
+                </button>
+            </nav>
+            <div class="p-4 border-t border-white/10 bg-black/20">
+                <div class="flex items-center gap-3 cursor-pointer" @click="activeTab = 'profile'">
+                    <img v-if="myProfile.icon" :src="myProfile.icon"
+                        class="w-10 h-10 rounded-full object-cover border-2 border-white/50">
+                    <div v-else
+                        class="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold border-2 border-white/50"
+                        :class="myProfile.color">{{ myProfile.name.slice(0,1) }}</div>
+                    <div class="flex-1 min-w-0">
+                        <div class="font-bold text-sm truncate">{{ myProfile.name }}</div>
+                        <div class="text-xs text-white/70 truncate">ID: {{ myUserId ? myUserId.slice(0,6) : '...' }}...
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- メインエリア -->
+        <div class="flex-1 flex flex-col relative overflow-hidden bg-gray-50 min-w-0">
+            <!-- ヘッダー (スマホ) -->
+            <header
+                class="text-white p-4 shadow-md z-10 flex justify-between items-center shrink-0 transition-colors duration-300 relative"
+                :class="theme.header">
+                <h1 class="text-lg font-bold truncate flex items-center flex-1 mr-2">
+                    <button v-if="activeTab === 'rooms' && currentRoom" @click="leaveRoom"
+                        class="mr-2 bg-black/20 px-3 py-1 rounded-full text-xs flex items-center">← 退出</button>
+                    <span v-if="activeTab === 'board'">みんなの掲示板</span>
+                    <span v-else-if="activeTab === 'profile'">プロフィール</span>
+                    <span v-else-if="activeTab === 'rooms'">{{ currentRoom ? getRoomName(currentRoom) : '部屋を選択'
+                        }}</span>
+                </h1>
+                <div class="flex items-center gap-2">
+                    <button v-if="activeTab === 'rooms' && currentRoom" @click="openCurrentRoomMembers"
+                        class="bg-white/20 px-3 py-1 rounded-full text-xs font-bold shadow-sm">
+                        {{ roomMembers.length }}人
+                    </button>
+                </div>
+            </header>
+
+            <!-- 通知 -->
+            <transition name="notification">
+                <div v-if="notification.visible"
+                    class="absolute top-20 left-0 right-0 mx-auto w-max max-w-[90%] z-50 px-4 py-2 rounded-full shadow-lg text-sm font-bold flex items-center gap-2 pointer-events-none"
+                    :class="notification.bg">
+                    <span>{{ notification.icon }}</span>
+                    <span class="truncate max-w-[200px]">{{ notification.message }}</span>
+                </div>
+            </transition>
+
+            <!-- サーバー診断結果表示エリア -->
+            <div v-if="serverStatus.length > 0"
+                class="absolute top-16 left-0 right-0 mx-4 z-40 flex flex-col gap-2 animate-fade-in-up">
+                <div v-for="err in serverStatus" :key="err"
+                    class="bg-red-500 text-white px-4 py-3 rounded-lg shadow-lg flex items-start text-sm border-2 border-white">
+                    <span class="text-xl mr-2">⚠️</span>
+                    <div class="flex-1">
+                        <p class="font-bold">{{ err.title }}</p>
+                        <p class="text-xs opacity-90 mt-1">{{ err.desc }}</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 接続エラー表示 (サーバー自体落ちてる時) -->
+            <div v-if="connectionError"
+                class="absolute top-0 left-0 w-full h-full flex items-center justify-center bg-white/90 z-50 p-6 text-center">
+                <div>
+                    <div class="text-4xl mb-4">🔌</div>
+                    <h3 class="text-lg font-bold text-gray-800 mb-2">サーバーに接続できません</h3>
+                    <p class="text-sm text-gray-600 mb-4">
+                        PocketBaseサーバー ({{ PB_URL }}) が<br>起動していないか、接続がブロックされています。
+                    </p>
+                    <button @click="retryConnection"
+                        class="bg-indigo-600 text-white px-6 py-2 rounded-full font-bold shadow hover:bg-indigo-700 transition">再試行</button>
+                </div>
+            </div>
+
+            <!-- コンテンツ -->
+            <div class="flex-1 overflow-hidden relative">
+                <transition name="page" mode="out-in">
+
+                    <!-- 1. 掲示板 -->
+                    <div v-if="activeTab === 'board'" key="board" class="h-full flex flex-col w-full">
+                        <div class="p-2 text-center text-xs font-bold border-b border-gray-100"
+                            :class="[theme.light, theme.text]">
+                            ここは全体掲示板です (PocketBase稼働中)
+                        </div>
+                        <div ref="boardContainer" class="flex-1 overflow-y-auto p-4 space-y-4 pb-20 md:pb-4">
+                            <div v-if="boardMessages.length === 0" class="text-center text-gray-400 text-sm py-10">
+                                まだ投稿はありません。</div>
+                            <div v-for="msg in boardMessages" :key="msg.id"
+                                class="flex flex-col items-start animate-fade-in-up">
+                                <div class="flex items-end mb-1 ml-1 group cursor-pointer"
+                                    @click="showUserProfile(msg)">
+                                    <img v-if="msg.user_icon" :src="msg.user_icon"
+                                        class="w-8 h-8 rounded-full border object-cover mr-2">
+                                    <div v-else
+                                        class="w-8 h-8 rounded-full mr-2 flex items-center justify-center text-white text-xs font-bold"
+                                        :class="msg.user_color">{{ msg.user_name.slice(0,1) }}</div>
+                                    <span class="text-xs text-gray-600 font-bold mr-2">{{ msg.user_name }}</span>
+                                    <span class="text-[10px] text-gray-400">{{ formatTime(msg.created) }}</span>
+                                </div>
+                                <div
+                                    class="bg-white border border-gray-200 rounded-xl rounded-tl-none px-4 py-2 text-sm shadow-sm break-words max-w-[90%] ml-10">
+                                    {{ msg.text }}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="p-3 bg-white border-t border-gray-200 absolute bottom-0 w-full md:static">
+                            <form @submit.prevent="sendMessage('board')" class="flex gap-2">
+                                <input v-model="newMessage" type="text" placeholder="ひとこと..."
+                                    class="flex-1 bg-gray-100 rounded-full px-4 py-3 focus:outline-none focus:ring-2 text-sm"
+                                    :class="`focus:ring-${theme.base}-500`">
+                                <button type="submit"
+                                    class="text-white rounded-full w-12 h-12 flex items-center justify-center shadow-lg"
+                                    :class="theme.button" :disabled="!newMessage.trim()">
+                                    <span class="rotate-90 transform">➤</span>
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+
+                    <!-- 2. 部屋 -->
+                    <div v-else-if="activeTab === 'rooms'" key="rooms" class="h-full flex flex-col w-full">
+                        <div v-if="!currentRoom" class="h-full overflow-y-auto p-4 space-y-4 pb-20 md:pb-4">
+                            <div class="grid gap-3 md:grid-cols-2">
+                                <button v-for="room in rooms" :key="room.id" @click="enterRoom(room.id)"
+                                    class="relative p-4 bg-white border border-gray-200 rounded-xl shadow-sm hover:shadow-md transition-all text-left flex items-center group h-full">
+                                    <div class="w-10 h-10 rounded-full flex items-center justify-center mr-3 text-xl"
+                                        :class="[theme.light, theme.text]">{{ room.icon }}</div>
+                                    <div class="flex-1">
+                                        <div class="flex justify-between items-center">
+                                            <div class="font-bold text-gray-800">{{ room.name }}</div>
+                                            <div class="text-xs font-bold px-2 py-1 rounded-full"
+                                                :class="getRoomCount(room.id) >= 5 ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'">
+                                                {{ getRoomCount(room.id) }}/5
+                                            </div>
+                                        </div>
+                                        <div class="text-xs text-gray-500 mt-1">{{ room.desc }}</div>
+                                    </div>
+                                </button>
+                            </div>
+                        </div>
+                        <div v-else class="h-full flex flex-col relative">
+                            <div ref="messagesContainer" class="flex-1 overflow-y-auto p-4 space-y-4 pb-20 md:pb-4">
+                                <div v-if="roomMessages.length === 0" class="text-center text-gray-400 text-sm py-10">
+                                    一番乗りです！</div>
+                                <div v-for="msg in roomMessages" :key="msg.id" class="flex flex-col"
+                                    :class="msg.user_id === myUserId ? 'items-end' : 'items-start'">
+                                    <div v-if="msg.user_id !== myUserId"
+                                        class="flex items-end mb-1 ml-1 group cursor-pointer"
+                                        @click="showUserProfile(msg)">
+                                        <img v-if="msg.user_icon" :src="msg.user_icon"
+                                            class="w-8 h-8 rounded-full border object-cover mr-2">
+                                        <div v-else
+                                            class="w-8 h-8 rounded-full mr-2 flex items-center justify-center text-white text-xs font-bold"
+                                            :class="msg.user_color">{{ msg.user_name.slice(0,1) }}</div>
+                                        <span class="text-[10px] text-gray-500">{{ msg.user_name }}</span>
+                                    </div>
+                                    <div class="max-w-[80%] rounded-2xl px-4 py-2 text-sm shadow-sm break-words"
+                                        :class="[msg.user_id === myUserId ? (msg.user_color || theme.header) + ' text-white rounded-br-none' : 'bg-white text-gray-800 border border-gray-200 rounded-bl-none ml-10']">
+                                        {{ msg.text }}
+                                    </div>
+                                    <span class="text-[10px] text-gray-400 mt-1 mx-1"
+                                        :class="msg.user_id !== myUserId ? 'ml-10' : ''">{{ formatTime(msg.created)
+                                        }}</span>
+                                </div>
+                            </div>
+                            <div class="p-3 bg-white border-t border-gray-200 absolute bottom-0 w-full md:static">
+                                <form @submit.prevent="sendMessage('room')" class="flex gap-2">
+                                    <input v-model="newMessage" type="text" placeholder="メッセージ..."
+                                        class="flex-1 bg-gray-100 rounded-full px-4 py-3 focus:outline-none focus:ring-2 text-sm"
+                                        :class="`focus:ring-${theme.base}-500`">
+                                    <button type="submit"
+                                        class="text-white rounded-full w-12 h-12 flex items-center justify-center shadow-lg"
+                                        :class="theme.button" :disabled="!newMessage.trim()">
+                                        <span class="rotate-90 transform">➤</span>
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 3. プロフィール -->
+                    <div v-else-if="activeTab === 'profile'" key="profile"
+                        class="h-full overflow-y-auto p-6 pb-20 w-full md:pb-6">
+                        <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 mb-6 text-center">
+                            <div class="relative w-24 h-24 mx-auto mb-4 group">
+                                <img v-if="myProfile.icon" :src="myProfile.icon"
+                                    class="w-full h-full rounded-full object-cover border-4 border-white shadow-md">
+                                <div v-else
+                                    class="w-full h-full rounded-full flex items-center justify-center text-white text-4xl font-bold shadow-md"
+                                    :class="myProfile.color">{{ myProfile.name.slice(0,1) || '?' }}</div>
+                                <label
+                                    class="absolute bottom-0 right-0 bg-gray-800 text-white p-2 rounded-full cursor-pointer hover:bg-gray-700 shadow-lg active:scale-90 transition-transform">
+                                    <span>📷</span>
+                                    <input type="file" accept="image/*" class="hidden" @change="handleImageUpload">
+                                </label>
+                            </div>
+                            <p class="text-xs text-gray-400 mb-4">ID: {{ myUserId }}</p>
+                            <div class="space-y-4 text-left">
+                                <div><label class="text-xs font-bold text-gray-500">名前</label><input
+                                        v-model="myProfile.name" type="text"
+                                        class="w-full bg-gray-100 rounded-lg px-3 py-2 mt-1"></div>
+                                <div><label class="text-xs font-bold text-gray-500">一言</label><textarea
+                                        v-model="myProfile.bio"
+                                        class="w-full bg-gray-100 rounded-lg px-3 py-2 mt-1"></textarea></div>
+
+                                <div>
+                                    <label class="block text-sm font-bold text-gray-700 mb-2">通知設定</label>
+                                    <div class="space-y-2 bg-gray-50 p-3 rounded-lg border border-gray-100">
+                                        <div class="flex items-center justify-between">
+                                            <div class="flex items-center"><span class="text-sm text-gray-600">入室通知
+                                                    (👋)</span></div>
+                                            <div
+                                                class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
+                                                <input type="checkbox" name="toggle" id="toggle-entry"
+                                                    v-model="myProfile.settings.entry"
+                                                    class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer transition-all duration-300" />
+                                                <label for="toggle-entry"
+                                                    class="toggle-label block overflow-hidden h-5 rounded-full bg-gray-300 cursor-pointer transition-colors duration-300"></label>
+                                            </div>
+                                        </div>
+                                        <div class="flex items-center justify-between">
+                                            <div class="flex flex-col"><span class="text-sm text-gray-600">メッセージ通知
+                                                    (💬)</span><span
+                                                    class="text-[10px] text-gray-400">ONにするとブラウザ通知の許可を求めます</span></div>
+                                            <div
+                                                class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
+                                                <input type="checkbox" name="toggle" id="toggle-msg"
+                                                    v-model="myProfile.settings.message"
+                                                    @change="requestNotificationPermission"
+                                                    class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer transition-all duration-300" />
+                                                <label for="toggle-msg"
+                                                    class="toggle-label block overflow-hidden h-5 rounded-full bg-gray-300 cursor-pointer transition-colors duration-300"></label>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div><label class="text-xs font-bold text-gray-500">テーマカラー</label>
+                                    <div class="flex flex-wrap gap-2 mt-1">
+                                        <button v-for="c in colors" :key="c.base" @click="myProfile.color = c.main"
+                                            class="w-8 h-8 rounded-full border-2"
+                                            :class="[c.main, myProfile.color === c.main ? 'border-gray-800 scale-110' : 'border-transparent']"></button>
+                                    </div>
+                                </div>
+                                <button @click="saveProfile"
+                                    class="w-full text-white font-bold py-3 rounded-xl shadow-md active:scale-95 transition-all"
+                                    :class="theme.button">保存する</button>
+
+                                <!-- 管理者用セクション -->
+                                <div v-if="myUserId === ADMIN_UID"
+                                    class="mt-8 pt-6 border-t border-gray-200 animate-fade-in-up">
+                                    <h3
+                                        class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                                        <span>👑</span> 管理者メニュー
+                                    </h3>
+                                    <div
+                                        class="mb-3 flex items-center justify-between bg-gray-50 p-2 rounded border border-gray-200">
+                                        <span class="text-sm text-gray-600 font-bold">Kickボタンを表示</span>
+                                        <div
+                                            class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
+                                            <input type="checkbox" name="toggle" id="toggle-admin" v-model="adminMode"
+                                                class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer transition-all duration-300" />
+                                            <label for="toggle-admin"
+                                                class="toggle-label block overflow-hidden h-5 rounded-full bg-gray-300 cursor-pointer transition-colors duration-300"></label>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- ID表示 (全員に表示) -->
+                                <div class="mt-8 pt-6 border-t border-gray-200">
+                                    <p class="text-[10px] text-gray-400 text-center mb-1">Your ID (Tap to copy)</p>
+                                    <div class="bg-gray-100 text-gray-500 p-2 rounded text-[10px] font-mono text-center break-all cursor-pointer hover:bg-gray-200 transition-colors"
+                                        @click="copyUid">
+                                        {{ myUserId }}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </transition>
+            </div>
+
+            <!-- ユーザープロフィールモーダル -->
+            <transition name="fade">
+                <div v-if="selectedUser"
+                    class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+                    @click="selectedUser = null">
+                    <div class="bg-white w-full max-w-xs rounded-2xl p-6 shadow-2xl text-center" @click.stop>
+                        <div class="w-24 h-24 mx-auto mb-4">
+                            <img v-if="selectedUser.user_icon" :src="selectedUser.user_icon"
+                                class="w-full h-full rounded-full object-cover border-4 border-white shadow-md">
+                            <div v-else
+                                class="w-full h-full rounded-full flex items-center justify-center text-white text-4xl font-bold shadow-md"
+                                :class="selectedUser.user_color">{{ selectedUser.user_name.slice(0,1) }}</div>
+                        </div>
+                        <h3 class="text-xl font-bold mb-2">{{ selectedUser.user_name }}</h3>
+                        <p class="text-sm text-gray-600 bg-gray-100 p-3 rounded-lg mb-4">{{ selectedUser.user_bio ||
+                            '一言なし' }}</p>
+                        <button v-if="selectedUser.user_id !== myUserId" @click="toggleFollow(selectedUser.user_id)"
+                            class="w-full py-2 rounded-lg font-bold text-sm border transition-colors"
+                            :class="isFollowing(selectedUser.user_id) ? 'bg-gray-100 text-gray-500 border-gray-300' : theme.button + ' text-white'">
+                            {{ isFollowing(selectedUser.user_id) ? 'フォロー中' : 'フォローする' }}
+                        </button>
+                    </div>
+                </div>
+            </transition>
+
+            <!-- メンバーリストモーダル -->
+            <transition name="fade">
+                <div v-if="showMemberModal"
+                    class="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm"
+                    @click="showMemberModal = false">
+                    <div class="bg-white w-full sm:max-w-md h-[60vh] rounded-t-2xl sm:rounded-2xl flex flex-col"
+                        @click.stop>
+                        <div class="p-4 border-b flex justify-between items-center">
+                            <h3 class="font-bold">メンバーリスト ({{ roomMembers.length }}人)</h3>
+                            <button @click="showMemberModal = false" class="text-gray-400">✕</button>
+                        </div>
+                        <div class="flex-1 overflow-y-auto p-4 space-y-2">
+                            <div v-for="m in roomMembers" :key="m.id"
+                                class="flex items-center p-2 hover:bg-gray-50 rounded-lg">
+                                <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm mr-3 shrink-0"
+                                    :class="m.user_color">{{ m.user_name.slice(0,1) }}</div>
+                                <div class="flex-1 min-w-0">
+                                    <div class="font-bold truncate">{{ m.user_name }}</div>
+                                    <div class="text-xs text-gray-500 truncate">{{ m.user_bio }}</div>
+                                </div>
+                                <span v-if="isFollowing(m.user_id)"
+                                    class="text-xs bg-yellow-100 text-yellow-700 px-2 py-1 rounded-full">フォロー中</span>
+
+                                <!-- Kickボタン -->
+                                <button v-if="myUserId === ADMIN_UID && adminMode && m.user_id !== myUserId"
+                                    @click.stop="kickUser(m)"
+                                    class="ml-2 bg-red-100 text-red-600 p-2 rounded-full hover:bg-red-200 transition">
+                                    🗑️
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </transition>
+
+            <!-- ボトムナビ (スマホ) -->
+            <nav
+                class="bg-white border-t border-gray-200 shrink-0 safe-bottom md:hidden h-16 flex justify-around items-center">
+                <button @click="handleTabClick('board')"
+                    class="flex flex-col items-center text-xs font-medium transition-colors"
+                    :class="activeTab === 'board' ? theme.text : 'text-gray-400'">
+                    <span class="text-xl mb-1">📋</span> 掲示板
+                </button>
+                <button @click="handleTabClick('rooms')"
+                    class="flex flex-col items-center text-xs font-medium transition-colors relative"
+                    :class="activeTab === 'rooms' ? theme.text : 'text-gray-400'">
+                    <span class="text-xl mb-1">🏠</span> 部屋
+                    <span v-if="currentRoom" class="absolute top-1 right-3 w-2 h-2 bg-green-500 rounded-full"></span>
+                </button>
+                <button @click="handleTabClick('profile')"
+                    class="flex-1 flex flex-col items-center text-xs font-medium transition-colors"
+                    :class="activeTab === 'profile' ? theme.text : 'text-gray-400'">
+                    <span class="text-xl mb-1">👤</span> 設定
+                </button>
+            </nav>
+
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref, onMounted, watch, computed, nextTick } = Vue;
+
+        // ★ PocketBaseのURL (Cloudflare TunnelのURL)
+        const PB_URL = 'https://policies-ave-violin-comic.trycloudflare.com';
+        const ADMIN_UID = 'eIECgBKO44OtooVI040NtYXpxS73'; // 管理者ID
+
+        const pb = new PocketBase(PB_URL);
+        pb.autoCancellation(false);
+
+        createApp({
+            setup() {
+                // --- State ---
+                const activeTab = ref('board');
+                const currentRoom = ref(null);
+                const myUserId = ref('');
+                const myProfile = ref({ name: '名無し', color: 'bg-indigo-600', icon: '', bio: '', settings: { entry: false, message: false } });
+
+                const boardMessages = ref([]);
+                const roomMessages = ref([]);
+                const roomMembers = ref([]);
+                const roomCounts = ref({});
+                const follows = ref([]);
+
+                const newMessage = ref("");
+                const messagesContainer = ref(null);
+                const boardContainer = ref(null);
+
+                const selectedUser = ref(null);
+                const showMemberModal = ref(false);
+                const notification = ref({ visible: false, message: '', icon: '', bg: '' });
+                const connectionError = ref(false);
+                const serverStatus = ref([]);
+                const isSaving = ref(false);
+
+                // 管理者モードスイッチ
+                const adminMode = ref(false);
+
+                // --- Constants ---
+                const rooms = [
+                    { id: 'anime', name: 'アニメ部屋', desc: '今期アニメや名作について', icon: '📺' },
+                    { id: 'game', name: 'ゲーム部屋', desc: '新作からレトロゲーまで', icon: '🎮' },
+                    { id: 'seiyu', name: '声優部屋', desc: '推しの声優さん語り', icon: '🎙️' },
+                    { id: 'movie', name: '映画部屋', desc: '新作・旧作・サブスク感想', icon: '🎬' },
+                    { id: 'manga', name: 'マンガ部屋', desc: '連載中・完結作の感想', icon: '📚' },
+                    { id: 'vtuber', name: 'V・配信者', desc: 'VTuberや実況者の話', icon: '💻' }
+                ];
+
+                const colors = [
+                    { main: 'bg-indigo-600', dark: 'bg-indigo-900', light: 'bg-indigo-50', text: 'text-indigo-600', button: 'bg-indigo-600', header: 'bg-indigo-600', base: 'indigo' },
+                    { main: 'bg-red-500', dark: 'bg-red-900', light: 'bg-red-50', text: 'text-red-500', button: 'bg-red-500', header: 'bg-red-500', base: 'red' },
+                    { main: 'bg-green-500', dark: 'bg-green-900', light: 'bg-green-50', text: 'text-green-500', button: 'bg-green-500', header: 'bg-green-500', base: 'green' },
+                    { main: 'bg-blue-500', dark: 'bg-blue-900', light: 'bg-blue-50', text: 'text-blue-500', button: 'bg-blue-500', header: 'bg-blue-500', base: 'blue' },
+                    { main: 'bg-yellow-500', dark: 'bg-yellow-900', light: 'bg-yellow-50', text: 'text-yellow-600', button: 'bg-yellow-500', header: 'bg-yellow-500', base: 'yellow' },
+                    { main: 'bg-purple-500', dark: 'bg-purple-900', light: 'bg-purple-50', text: 'text-purple-500', button: 'bg-purple-500', header: 'bg-purple-500', base: 'purple' },
+                    { main: 'bg-pink-500', dark: 'bg-pink-900', light: 'bg-pink-50', text: 'text-pink-500', button: 'bg-pink-500', header: 'bg-pink-500', base: 'pink' },
+                    { main: 'bg-gray-600', dark: 'bg-gray-900', light: 'bg-gray-100', text: 'text-gray-600', button: 'bg-gray-600', header: 'bg-gray-600', base: 'gray' },
+                ];
+
+                const theme = computed(() => colors.find(c => c.main === myProfile.value.color) || colors[0]);
+
+                // --- Authentication ---
+                const initAuth = async () => {
+                    try {
+                        await pb.health.check();
+                        connectionError.value = false;
+                    } catch (e) {
+                        console.error("Server Check Error:", e);
+                        connectionError.value = true;
+                        return;
+                    }
+
+                    await checkCollections();
+
+                    let storedId = localStorage.getItem('paka_uid');
+                    let storedPass = localStorage.getItem('paka_pass');
+                    let email = localStorage.getItem('paka_email');
+
+                    if (!storedId || !email || !storedPass) {
+                        const randomStr = Math.random().toString(36).slice(-8);
+                        email = `paka_${randomStr}@example.com`;
+                        storedPass = `pass_${randomStr}`;
+                        const username = `user_${randomStr}`;
+                        try {
+                            await pb.collection('users').create({
+                                username: username,
+                                email: email,
+                                emailVisibility: true,
+                                password: storedPass,
+                                passwordConfirm: storedPass,
+                                name: '名無し',
+                                color: 'bg-indigo-600'
+                            });
+                        } catch (err) { console.error("Create Error:", err); }
+                    }
+
+                    try {
+                        await pb.collection('users').authWithPassword(email, storedPass);
+
+                        localStorage.setItem('paka_uid', pb.authStore.model.id);
+                        localStorage.setItem('paka_pass', storedPass);
+                        localStorage.setItem('paka_email', email);
+
+                        myUserId.value = pb.authStore.model.id;
+                        // ユーザー情報を取得してマージ
+                        const userRecord = await pb.collection('users').getOne(myUserId.value);
+                        myProfile.value = {
+                            name: userRecord.name || '名無し',
+                            color: userRecord.color || 'bg-indigo-600',
+                            bio: userRecord.bio || '',
+                            icon: userRecord.icon_base64 || '',
+                            // 設定もDBから読み込みたいが今回は簡易的に
+                            settings: { entry: false, message: false }
+                        };
+
+                        loadBoardMessages();
+                        loadFollows();
+                        subscribeRealtime();
+                        updateRoomCounts();
+
+                    } catch (err) {
+                        console.error("Auth Error:", err);
+                        // 再ログイン失敗時はストレージクリアしてリロードさせる等の処理が必要だが今回は省略
+                    }
+                };
+
+                const checkCollections = async () => {
+                    serverStatus.value = [];
+                    const checks = ['messages', 'members', 'follows'];
+                    for (const col of checks) {
+                        try {
+                            await pb.collection(col).getList(1, 1);
+                        } catch (e) {
+                            if (e.status === 404) {
+                                serverStatus.value.push({ title: `${col} コレクションがありません`, desc: `PocketBase管理画面で作成してください。` });
+                            } else if (e.status === 403) {
+                                serverStatus.value.push({ title: `${col} の権限がありません`, desc: `API RulesをUnlockしてください。` });
+                            }
+                        }
+                    }
+                };
+
+                const retryConnection = () => {
+                    connectionError.value = false;
+                    serverStatus.value = [];
+                    initAuth();
+                };
+
+                // --- Data Loading & Realtime ---
+                // (省略せず記述)
+                const loadBoardMessages = async () => {
+                    if (!pb.authStore.isValid) return;
+                    try {
+                        const result = await pb.collection('messages').getList(1, 50, { filter: 'room = ""', sort: '-created' });
+                        boardMessages.value = result.items;
+                    } catch (e) { console.error(e); }
+                };
+
+                const loadRoomMessages = async (roomId) => {
+                    if (!pb.authStore.isValid) return;
+                    try {
+                        const result = await pb.collection('messages').getList(1, 50, { filter: `room = "${roomId}"`, sort: 'created' });
+                        roomMessages.value = result.items;
+                        nextTick(scrollToBottom);
+                    } catch (e) { console.error(e); }
+                };
+
+                const loadRoomMembers = async (roomId) => {
+                    if (!pb.authStore.isValid) return;
+                    try {
+                        const result = await pb.collection('members').getFullList({ filter: `room = "${roomId}"`, sort: '-created' });
+                        roomMembers.value = result;
+                    } catch (e) { console.error(e); }
+                };
+
+                const loadFollows = async () => {
+                    if (!pb.authStore.isValid) return;
+                    try {
+                        const result = await pb.collection('follows').getFullList({ filter: `owner_id = "${myUserId.value}"` });
+                        follows.value = result.map(f => f.target_id);
+                    } catch (e) { console.error(e); }
+                };
+
+                const updateRoomCounts = async () => {
+                    try {
+                        const result = await pb.collection('members').getFullList();
+                        const counts = {};
+                        result.forEach(m => { counts[m.room] = (counts[m.room] || 0) + 1; });
+                        roomCounts.value = counts;
+                    } catch (e) { }
+                };
+
+                const subscribeRealtime = () => {
+                    pb.collection('messages').subscribe('*', function (e) {
+                        if (e.action === 'create') {
+                            const msg = e.record;
+                            if (msg.room === '') {
+                                boardMessages.value.unshift(msg);
+                            } else if (msg.room === currentRoom.value) {
+                                roomMessages.value.push(msg);
+                                nextTick(scrollToBottom);
+                            }
+                        }
+                    });
+
+                    pb.collection('members').subscribe('*', function (e) {
+                        if (e.action === 'create') {
+                            if (e.record.room === currentRoom.value) {
+                                roomMembers.value.unshift(e.record);
+                                if (e.record.user_id !== myUserId.value && myProfile.value.settings.entry) {
+                                    const isFollow = follows.value.includes(e.record.user_id);
+                                    showNotification(`${e.record.user_name}さんが入室しました`, '👋', isFollow ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800');
+                                }
+                            }
+                            updateRoomCounts();
+                        } else if (e.action === 'delete') {
+                            // 自分が削除された場合 (Kick)
+                            if (e.record.user_id === myUserId.value && currentRoom.value === e.record.room) {
+                                leaveRoom();
+                                alert("退室しました（または管理者により退出させられました）");
+                            }
+
+                            if (e.record.room === currentRoom.value) {
+                                roomMembers.value = roomMembers.value.filter(m => m.id !== e.record.id);
+                                if (e.record.user_id !== myUserId.value && myProfile.value.settings.entry) {
+                                    showNotification(`${e.record.user_name}さんが退室しました`, '🚪', 'bg-gray-100 text-gray-600');
+                                }
+                            }
+                            updateRoomCounts();
+                        }
+                    });
+                };
+
+                // --- Actions ---
+                const sendMessage = async (target) => {
+                    if (!newMessage.value.trim()) return;
+                    const text = newMessage.value;
+                    newMessage.value = "";
+                    const room = target === 'board' ? '' : currentRoom.value;
+                    try {
+                        await pb.collection('messages').create({
+                            text: text,
+                            room: room,
+                            user_id: myUserId.value,
+                            user_name: myProfile.value.name,
+                            user_color: myProfile.value.color,
+                            user_icon: myProfile.value.icon,
+                        });
+                    } catch (e) { console.error(e); alert("送信エラー: " + e.message); }
+                };
+
+                const enterRoom = async (roomId) => {
+                    if (currentRoom.value) await leaveRoom();
+                    try {
+                        const record = await pb.collection('members').create({
+                            room: roomId,
+                            user_id: myUserId.value,
+                            user_name: myProfile.value.name,
+                            user_color: myProfile.value.color,
+                            user_icon: myProfile.value.icon,
+                            user_bio: myProfile.value.bio
+                        });
+                        sessionStorage.setItem('member_record_id', record.id);
+                        currentRoom.value = roomId;
+                        activeTab.value = 'rooms';
+                        loadRoomMessages(roomId);
+                        loadRoomMembers(roomId);
+                    } catch (e) { console.error(e); alert("入室できませんでした: " + e.message); }
+                };
+
+                const leaveRoom = async () => {
+                    if (!currentRoom.value) return;
+                    const recordId = sessionStorage.getItem('member_record_id');
+                    if (recordId) {
+                        try { await pb.collection('members').delete(recordId); } catch (e) { }
+                    }
+                    currentRoom.value = null;
+                    roomMessages.value = [];
+                    roomMembers.value = [];
+                };
+
+                const saveProfile = async () => {
+                    isSaving.value = true;
+                    try {
+                        await pb.collection('users').update(myUserId.value, {
+                            name: myProfile.value.name,
+                            color: myProfile.value.color,
+                            bio: myProfile.value.bio,
+                            icon_base64: myProfile.value.icon
+                        });
+                        alert("保存しました");
+                    } catch (e) { console.error(e); alert("保存エラー: " + e.message); }
+                    finally { isSaving.value = false; }
+                };
+
+                const toggleFollow = async (targetId) => {
+                    const isFollowing = follows.value.includes(targetId);
+                    try {
+                        if (isFollowing) {
+                            const list = await pb.collection('follows').getList(1, 1, { filter: `owner_id = "${myUserId.value}" && target_id = "${targetId}"` });
+                            if (list.items.length > 0) await pb.collection('follows').delete(list.items[0].id);
+                            follows.value = follows.value.filter(id => id !== targetId);
+                        } else {
+                            await pb.collection('follows').create({ owner_id: myUserId.value, target_id: targetId });
+                            follows.value.push(targetId);
+                        }
+                    } catch (e) { console.error(e); alert("フォロー操作エラー"); }
+                };
+
+                const kickUser = async (member) => {
+                    if (!confirm(`${member.user_name}さんを強制退室させますか？`)) return;
+                    try {
+                        // membersコレクションから該当レコードを削除するだけ
+                        await pb.collection('members').delete(member.id);
+                        alert("排除しました");
+                    } catch (e) {
+                        console.error(e);
+                        alert("排除失敗: " + e.message);
+                    }
+                };
+
+                const handleImageUpload = (e) => {
+                    const file = e.target.files[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = (ev) => { myProfile.value.icon = ev.target.result; };
+                    reader.readAsDataURL(file);
+                };
+
+                // UI Helpers
+                const handleTabClick = (tab) => {
+                    if (activeTab.value === 'rooms' && tab === 'rooms' && currentRoom.value) {
+                        leaveRoom();
+                    } else {
+                        activeTab.value = tab;
+                    }
+                };
+                const showUserProfile = (user) => { selectedUser.value = user; };
+                const openCurrentRoomMembers = () => { showMemberModal.value = true; };
+                const formatTime = (dateStr) => {
+                    const date = new Date(dateStr);
+                    return date.getHours().toString().padStart(2, '0') + ':' + date.getMinutes().toString().padStart(2, '0');
+                };
+                const getRoomName = (id) => rooms.find(r => r.id === id)?.name;
+                const getRoomCount = (id) => roomCounts.value[id] || 0;
+                const isFollowing = (uid) => follows.value.includes(uid);
+                const scrollToBottom = () => { if (messagesContainer.value) messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight; };
+                const showNotification = (msg, icon, bg) => {
+                    notification.value = { visible: true, message: msg, icon, bg };
+                    setTimeout(() => notification.value.visible = false, 3000);
+                };
+                const copyUid = () => {
+                    navigator.clipboard.writeText(myUserId.value).then(() => alert("IDをコピーしました"));
+                };
+                const requestNotificationPermission = () => {
+                    if ("Notification" in window && Notification.permission !== "granted") Notification.requestPermission();
+                };
+
+                onMounted(initAuth);
+
+                window.addEventListener('beforeunload', () => { leaveRoom(); });
+
+                return {
+                    activeTab, currentRoom, boardMessages, roomMessages, roomMembers,
+                    newMessage, messagesContainer, boardContainer,
+                    myProfile, colors, isSaving,
+                    selectedUser, showMemberModal, notification, connectionError, serverStatus,
+                    rooms, theme, myUserId, PB_URL, ADMIN_UID, adminMode, // 変数
+                    handleTabClick, enterRoom, leaveRoom, sendMessage, saveProfile, handleImageUpload,
+                    showUserProfile, formatTime, getRoomName, getRoomCount, openCurrentRoomMembers,
+                    toggleFollow, isFollowing, retryConnection, copyUid, kickUser, requestNotificationPermission
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+
+</html>

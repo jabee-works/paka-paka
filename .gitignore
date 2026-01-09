@@ -1,0 +1,14 @@
+# Binaries
+pocketbase
+cloudflared
+
+# Data
+pb_data/
+pb_public_bk/
+*.db
+
+# OS files
+.DS_Store
+
+# Logs
+*.log

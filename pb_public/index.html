@@ -1,0 +1,1737 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-V30SN5HZ0B"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag() { dataLayer.push(arguments); }
+        gtag('js', new Date());
+
+        gtag('config', 'G-V30SN5HZ0B');
+    </script>
+
+    <meta charset="UTF-8">
+    <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+
+    <title>paka-paka - リアルタイムチャット</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        theme: 'var(--theme-color)',
+                        bg: {
+                            main: 'var(--bg-main)',
+                            panel: 'var(--bg-panel)',
+                            input: 'var(--bg-input)',
+                        },
+                        text: {
+                            main: 'var(--text-main)',
+                            sub: 'var(--text-sub)',
+                        },
+                        border: {
+                            main: 'var(--border-main)',
+                        }
+                    },
+                    animation: {
+                        'fade-in': 'fadeIn 0.3s ease-out',
+                        'slide-up': 'slideUp 0.3s ease-out',
+                        'toast-in': 'toastIn 0.3s ease-out',
+                        'toast-out': 'toastOut 0.3s ease-in forwards',
+                        'slide-in-new-message': 'slideInNewMessage 0.4s ease-out',
+                    },
+                    keyframes: {
+                        fadeIn: {
+                            '0%': { opacity: '0' },
+                            '100%': { opacity: '1' },
+                        },
+                        slideUp: {
+                            '0%': { transform: 'translateY(20px)', opacity: '0' },
+                            '100%': { transform: 'translateY(0)', opacity: '1' },
+                        },
+                        toastIn: {
+                            '0%': { transform: 'translateY(-100%)', opacity: '0' },
+                            '100%': { transform: 'translateY(0)', opacity: '1' },
+                        },
+                        toastOut: {
+                            '0%': { transform: 'translateY(0)', opacity: '1' },
+                            '100%': { transform: 'translateY(-100%)', opacity: '0' },
+                        },
+                        slideInNewMessage: {
+                            '0%': { transform: 'translateY(20px)', opacity: '0' },
+                            '100%': { transform: 'translateY(0)', opacity: '1' },
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- React & Pocketbase -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pocketbase@0.22.0/dist/pocketbase.umd.js?v=0.22.0"></script>
+
+    <style>
+        :root {
+            --theme-color: #FA6C9A;
+            --bg-main: #0f172a;
+            --bg-panel: #1e293b;
+            --bg-input: #334155;
+            --text-main: #ffffff;
+            --text-sub: #9ca3af;
+            --border-main: #374151;
+            --glass-bg: rgba(30, 41, 59, 0.85);
+            --glass-border: rgba(255, 255, 255, 0.1);
+        }
+
+        [data-theme="light"] {
+            --bg-main: #f3f4f6;
+            --bg-panel: #ffffff;
+            --bg-input: #e5e7eb;
+            --text-main: #111827;
+            --text-sub: #6b7280;
+            --border-main: #e5e7eb;
+            --glass-bg: rgba(255, 255, 255, 0.85);
+            --glass-border: rgba(0, 0, 0, 0.05);
+        }
+
+        .scrollbar-hide::-webkit-scrollbar {
+            display: none;
+        }
+
+        .scrollbar-hide {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+
+        .h-dvh-fix {
+            height: 100vh;
+            height: 100dvh;
+        }
+
+        body {
+            background-color: var(--bg-main);
+            color: var(--text-main);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            overscroll-behavior-y: none;
+            -webkit-tap-highlight-color: transparent;
+            transition: background-color 0.3s, color 0.3s;
+            height: 100dvh;
+        }
+
+        #root {
+            height: 100dvh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        input,
+        textarea,
+        button {
+            font-size: 16px !important;
+        }
+
+        .safe-bottom {
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+
+        .safe-top {
+            padding-top: env(safe-area-inset-top);
+        }
+
+        .glass {
+            background: var(--glass-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border-top: 1px solid var(--glass-border);
+            transition: background 0.3s, border-color 0.3s;
+        }
+
+        .reaction-picker {
+            z-index: 1000 !important;
+            position: fixed;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        // ==========================================
+        // 【設定】サーバーURL
+        // ==========================================
+        const SERVER_URL = "https://policies-ave-violin-comic.trycloudflare.com";
+
+        const { useState, useEffect, useRef, createContext, useContext, useCallback } = React;
+
+        // --- Constants ---
+        const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "🙏"];
+
+        const HEARTBEAT_INTERVAL_MS = 20 * 1000;
+        const GHOST_TIMEOUT_MS = 60 * 1000;
+
+        const CHINCHIRO_BOT_PROFILE = {
+            id: "bot_chinchiro",
+            name: "チンチロBOT 🎲",
+            color: "#FFA500",
+            icon: null,
+            bio: "サイコロを振ります！「チンチロ」と入力してください。",
+        };
+
+        // --- Utils ---
+        const resizeImage = (file, targetSize = 96, quality = 0.6) => {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        const ctx = canvas.getContext('2d');
+                        const size = targetSize;
+                        canvas.width = size;
+                        canvas.height = size;
+                        let scale = Math.max(size / img.width, size / img.height);
+                        let w = img.width * scale;
+                        let h = img.height * scale;
+                        let x = (size - w) / 2;
+                        let y = (size - h) / 2;
+                        ctx.drawImage(img, x, y, w, h);
+                        canvas.toBlob((blob) => {
+                            resolve(blob);
+                        }, 'image/jpeg', quality);
+                    };
+                    img.src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            });
+        };
+
+        // --- iOS/Native Notification Helper ---
+        const sendNativeNotification = async (title, body) => {
+            // Notifications disabled in simplified version
+        };
+
+        const getFileUrl = (pb, record, filename, fallback = null) => {
+            if (!filename) return fallback;
+            if (filename && typeof filename === 'object' && filename.url) return filename.url;
+            if (filename instanceof Blob) return fallback;
+            if (typeof filename === 'string' && (filename.startsWith('blob:') || filename.startsWith('data:') || filename.startsWith('http'))) return filename;
+
+            try {
+                // コレクション名の推測
+                const collectionName = (record && (record.collectionName || record['@collectionName'])) || 'members';
+                // レコードIDの推測
+                const recordId = (record && (record.last_member_id || record.id));
+
+                if (pb && pb.files && recordId) {
+                    return pb.files.getURL({ id: recordId, collectionName }, filename);
+                }
+
+                // pbがない場合の直接構築
+                if (recordId) {
+                    return `${SERVER_URL}/api/files/${collectionName}/${recordId}/${filename}`;
+                }
+                return fallback;
+            } catch (e) {
+                return fallback;
+            }
+        };
+
+        const renderTextWithLinks = (text) => {
+            if (!text) return null;
+            const urlRegex = /(https?:\/\/[^\s]+)/g;
+            const parts = text.split(urlRegex);
+            return parts.map((part, index) => {
+                if (part.match(urlRegex)) {
+                    const linkColorClass = 'text-cyan-400 font-bold hover:text-cyan-300 transition-colors';
+                    return (
+                        <a key={index} href={part} target="_blank" rel="noopener noreferrer" className={`underline break-all ${linkColorClass}`} onClick={e => e.stopPropagation()}>
+                            {part}
+                        </a>
+                    );
+                }
+                return part;
+            });
+        };
+
+        // --- Icons ---
+        const LucideIcons = {
+            ArrowLeft: (props) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="m12 19-7-7 7-7" /><path d="M19 12H5" /></svg>,
+            Send: (props) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" /></svg>,
+            Image: (props) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><rect width="18" height="18" x="3" y="3" rx="2" ry="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" /></svg>,
+            Users: (props) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>,
+            MessageSquare: (props) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>,
+            Camera: (props) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" /><circle cx="12" cy="13" r="3" /></svg>,
+            Edit: (props) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" /></svg>,
+            LayoutGrid: (props) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><rect width="7" height="7" x="3" y="3" rx="1" /><rect width="7" height="7" x="14" y="3" rx="1" /><rect width="7" height="7" x="14" y="14" rx="1" /><rect width="7" height="7" x="3" y="14" rx="1" /></svg>,
+            Mic: (props) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" x2="12" y1="19" y2="22" /></svg>,
+            Film: (props) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><rect width="18" height="18" x="3" y="3" rx="2" /><path d="M7 3v18" /><path d="M3 7.5h4" /><path d="M3 12h18" /><path d="M3 16.5h4" /><path d="M17 3v18" /><path d="M17 7.5h4" /><path d="M17 16.5h4" /></svg>,
+            BookOpen: (props) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" /><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" /></svg>,
+            Sun: (props) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><circle cx="12" cy="12" r="4" /><path d="M12 2v2" /><path d="M12 20v2" /><path d="m4.93 4.93 1.41 1.41" /><path d="m17.66 17.66 1.41 1.41" /><path d="M2 12h2" /><path d="M20 12h2" /><path d="m6.34 17.66-1.41 1.41" /><path d="m19.07 4.93-1.41 1.41" /></svg>,
+            Moon: (props) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" /></svg>,
+            AlertTriangle: (props) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="m21.73 18-9-15-9 15z" /><path d="M12 9v4" /><path d="M12 17h.01" /></svg>,
+            CheckCircle: (props) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><path d="m9 11 3 3L22 4" /></svg>,
+            Info: (props) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><circle cx="12" cy="12" r="10" /><path d="M12 16v-4" /><path d="M12 8h.01" /></svg>,
+            FileText: (props) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" /><path d="M14 2v4a2 2 0 0 0 2 2h4" /><path d="M10 9H8" /><path d="M16 13H8" /><path d="M16 17H8" /></svg>,
+            Gamepad2: (props) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><line x1="6" x2="10" y1="12" y2="12" /><line x1="8" x2="8" y1="10" y2="14" /><line x1="15" x2="15.01" y1="13" y2="13" /><line x1="18" x2="18.01" y1="11" y2="11" /><rect width="20" height="12" x="2" y="6" rx="2" /></svg>,
+            Tv: (props) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><rect width="20" height="15" x="2" y="7" rx="2" ry="2" /><polyline points="17 2 12 7 7 2" /></svg>,
+            Puzzle: (props) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M19.439 15.435a4.5 4.5 0 0 0-6.87-6.87 4.5 4.5 0 0 0-4.39-2.316 4.5 4.5 0 0 0 2.31 8.583 4.5 4.5 0 0 0 8.95.603Z" /></svg>,
+            Mail: (props) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><rect width="20" height="16" x="2" y="4" rx="2" /><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" /></svg>,
+            Trash2: (props) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /><line x1="10" x2="10" y1="11" y2="17" /><line x1="14" x2="14" y1="11" y2="17" /></svg>,
+            AlertOctagon: (props) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2" /><line x1="12" x2="12" y1="8" y2="12" /><line x1="12" x2="12.01" y1="16" y2="16" /></svg>,
+            ShieldAlert: (props) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" /><path d="M12 8v4" /><path d="M12 16h.01" /></svg>,
+            Bell: (props) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /></svg>,
+        };
+
+        const ROOM_ICONS = {
+            'game': LucideIcons.Gamepad2,
+            'anime': LucideIcons.Tv,
+            'voice': LucideIcons.Mic,
+            'movie': LucideIcons.Film,
+            'comic': LucideIcons.BookOpen,
+            'boardgame': LucideIcons.Puzzle,
+        };
+
+        const ROOMS = [
+            { id: 'game', name: 'ゲーム', desc: '新作からレトロまで' },
+            { id: 'boardgame', name: 'ボードゲーム', desc: 'アナログゲーム全般' },
+            { id: 'anime', name: 'アニメ', desc: '今期のアニメについて' },
+            { id: 'voice', name: '声優', desc: '推しの話をしよう' },
+            { id: 'movie', name: '映画', desc: '新作・旧作・B級映画' },
+            { id: 'comic', name: '漫画', desc: 'おすすめの漫画を紹介' },
+        ];
+
+        // --- Context & Components ---
+        const ToastContext = createContext();
+        const useToast = () => useContext(ToastContext);
+
+        const Toast = ({ message, type, onClose }) => {
+            let bgColor = 'bg-gray-800';
+            let icon = <LucideIcons.Info size={18} className="text-white" />;
+            if (type === 'success') { bgColor = 'bg-green-500'; icon = <LucideIcons.CheckCircle size={18} className="text-white" />; }
+            else if (type === 'error') { bgColor = 'bg-red-600'; icon = <LucideIcons.AlertTriangle size={18} className="text-white" />; }
+            else if (type === 'info') { bgColor = 'bg-blue-500'; icon = <LucideIcons.Info size={18} className="text-white" />; }
+
+            const [isVisible, setIsVisible] = useState(true);
+            const [animationClass, setAnimationClass] = useState('animate-toast-in');
+
+            const handleClose = () => {
+                setAnimationClass('animate-toast-out');
+                setTimeout(() => { setIsVisible(false); onClose(); }, 300);
+            };
+
+            useEffect(() => { const timer = setTimeout(handleClose, 3000); return () => clearTimeout(timer); }, []);
+
+            if (!isVisible) return null;
+
+            return (
+                <div className={`fixed top-14 left-1/2 transform -translate-x-1/2 p-3 rounded-xl shadow-2xl z-[200] flex items-center gap-3 text-white max-w-sm w-[90%] transition-all ${bgColor} ${animationClass}`} onClick={handleClose}>
+                    {icon} <span className="text-sm font-medium">{message}</span>
+                </div>
+            );
+        };
+
+        const ToastProvider = ({ children }) => {
+            const [toast, setToast] = useState(null);
+            const showToast = (message, type = 'info') => { setToast({ message, type, id: Date.now() }); };
+            const closeToast = () => { setToast(null); };
+            return (
+                <ToastContext.Provider value={showToast}>
+                    {children}
+                    {toast && <Toast key={toast.id} message={toast.message} type={toast.type} onClose={closeToast} />}
+                </ToastContext.Provider>
+            );
+        };
+
+        const TermsModal = ({ onClose }) => {
+            return (
+                <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-end sm:items-center sm:justify-center p-4 animate-fade-in h-dvh-fix" onClick={onClose}>
+                    <div className="bg-bg-panel w-full max-w-lg rounded-3xl overflow-hidden max-h-[90%] flex flex-col border border-border-main shadow-2xl animate-slide-up" onClick={e => e.stopPropagation()}>
+                        <div className="p-5 border-b border-border-main flex justify-between items-center bg-bg-input">
+                            <h3 className="font-bold text-text-main flex items-center gap-2">利用規約・プライバシーポリシー</h3>
+                            <button onClick={onClose} className="p-2 -mr-2 text-text-sub hover:text-text-main text-xl">✕</button>
+                        </div>
+                        <div className="overflow-y-auto p-5 space-y-6 text-sm text-text-sub">
+                            <section>
+                                <h4 className="font-bold text-text-main mb-2">サービスについて</h4>
+                                <p>paka-pakaは、誰でも気軽に参加できるチャットコミュニティです。本サービスはアカウント登録なしでご利用いただけますが、投稿内容は他のユーザーにも公開されますので、個人情報の書き込みには十分ご注意ください。良識ある利用をお願いいたします。</p>
+                            </section>
+                            <div className="text-right mt-5">
+                                <button onClick={onClose} className="py-2 px-4 bg-theme text-white rounded-lg font-bold hover:brightness-110 transition-all">閉じる</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // 1. Connection Screen
+        const SetupScreen = ({ onConnect, defaultUrl }) => {
+            const [url, setUrl] = useState(defaultUrl || '');
+            const [loading, setLoading] = useState(false);
+            const [error, setError] = useState('');
+            const showToast = useToast();
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                if (!url) return;
+                setLoading(true);
+                setError('');
+                try {
+                    const pb = new PocketBase(url);
+                    // Connection check
+                    await pb.health.check();
+                    onConnect(url);
+                    showToast('PocketBaseに接続しました', 'success');
+                } catch (err) {
+                    // Try connecting anyway as health check might fail on some setups
+                    onConnect(url);
+                }
+            };
+
+            return (
+                <div className="flex flex-col items-center justify-center p-6 bg-bg-main relative overflow-hidden h-dvh-fix">
+                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-theme to-purple-500"></div>
+                    <div className="w-full max-w-md space-y-8 relative z-10 animate-slide-up">
+                        <div className="text-center">
+                            <h1 className="text-5xl font-bold tracking-tight text-theme mb-2 drop-shadow-[0_0_10px_rgba(var(--theme-color),0.3)]">paka-paka</h1>
+                            <p className="text-text-sub text-sm tracking-widest uppercase">Connect to Pocketbase</p>
+                        </div>
+                        <div className="bg-bg-panel/80 backdrop-blur-md p-8 rounded-2xl border border-border-main shadow-2xl">
+                            <form onSubmit={handleSubmit} className="space-y-6">
+                                <div>
+                                    <label className="text-sm font-bold text-text-sub block mb-2">SERVER URL</label>
+                                    <input type="url" required placeholder="https://..." className="w-full bg-bg-input p-4 rounded-xl mt-2 text-text-main border border-border-main focus:border-theme focus:bg-bg-input outline-none transition-all" value={url} onChange={(e) => setUrl(e.target.value)} />
+                                    {error && <p className="text-red-500 text-xs mt-2">{error}</p>}
+                                </div>
+                                <button type="submit" disabled={loading} className="w-full py-4 px-4 font-bold rounded-xl text-white bg-theme hover:brightness-110 transition-all shadow-[0_0_15px_rgba(var(--theme-color),0.5)]">
+                                    {loading ? 'CONNECTING...' : 'CONNECT'}
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // 2. Profile Setup
+        const ProfileSetup = ({ profile, onSave, onCancel, pb }) => {
+            const [name, setName] = useState((profile && profile.name) || '');
+            const [bio, setBio] = useState((profile && profile.bio) || '');
+            const [color, setColor] = useState((profile && profile.color) || '#FA6C9A');
+            const [iconData, setIconData] = useState((profile && profile.icon) || null);
+            const [themeMode, setThemeMode] = useState(localStorage.getItem('theme_mode') || 'dark');
+            const [notificationsEnabled, setNotificationsEnabled] = useState(!!(profile && profile.notifications_enabled));
+            const fileInputRef = useRef(null);
+            const showToast = useToast();
+            const colors = ['#FA6C9A', '#00ffff', '#bd00ff', '#fbbf24', '#ef4444', '#10b981'];
+
+            useEffect(() => {
+                document.documentElement.style.setProperty('--theme-color', color);
+            }, [color]);
+
+            useEffect(() => {
+                if (themeMode === 'light') {
+                    document.documentElement.setAttribute('data-theme', 'light');
+                } else {
+                    document.documentElement.removeAttribute('data-theme');
+                }
+            }, [themeMode]);
+
+            const handleImageChange = async (e) => {
+                if (e.target.files && e.target.files[0]) {
+                    resizeImage(e.target.files[0], 96, 0.6).then(blob => {
+                        const url = URL.createObjectURL(blob);
+                        setIconData({ blob, url });
+                    });
+                }
+            };
+
+            const handleToggleNotifications = async () => {
+                const isCapacitor = window.Capacitor && window.Capacitor.isNativePlatform();
+
+                if (!notificationsEnabled) {
+                    let granted = false;
+
+                    if (isCapacitor) {
+                        try {
+                            const { LocalNotifications } = window.Capacitor.Plugins;
+                            const permission = await LocalNotifications.requestPermissions();
+                            granted = (permission.display === 'granted');
+                        } catch (e) {
+                            console.error("Capacitor permission error:", e);
+                        }
+                    } else {
+                        const permission = await Notification.requestPermission();
+                        granted = (permission === 'granted');
+                    }
+
+                    if (granted) {
+                        setNotificationsEnabled(true);
+                        showToast('通知を許可しました', 'success');
+                    } else {
+                        showToast('通知が許可されていません', 'error');
+                    }
+                } else {
+                    setNotificationsEnabled(false);
+                }
+            };
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                localStorage.setItem('theme_mode', themeMode);
+
+                // 修正: プレビューURLを維持するため、iconData({blob, url})をそのまま渡す
+                onSave({
+                    id: (profile && profile.id) || 'u_' + Math.random().toString(36).substr(2, 9),
+                    name: name || '名無し',
+                    bio,
+                    color,
+                    icon: iconData,
+                    notifications_enabled: notificationsEnabled,
+                    last_member_id: profile ? profile.last_member_id : null // 既存のlast_member_idを保持
+                });
+                showToast('プロフィールを更新しました', 'success');
+            };
+
+            return (
+                <div className="absolute inset-0 z-50 bg-bg-main flex flex-col p-6 animate-fade-in overflow-y-auto h-dvh-fix">
+                    <div className="flex justify-between items-center mb-8">
+                        <h2 className="text-xl font-bold text-text-main">プロフィール設定</h2>
+                        {onCancel && (
+                            <button onClick={onCancel} className="p-2 -mr-2 text-text-sub hover:text-text-main text-xl">✕</button>
+                        )}
+                    </div>
+                    <form onSubmit={handleSubmit} className="flex-1 flex flex-col space-y-8 max-w-md mx-auto w-full pb-20">
+                        <div className="flex justify-center">
+                            <div className="relative group cursor-pointer" onClick={() => fileInputRef.current.click()}>
+                                <div className="w-32 h-32 rounded-full flex items-center justify-center text-5xl font-bold border-4 border-theme shadow-lg shadow-theme/30 overflow-hidden bg-bg-panel">
+                                    {(iconData && iconData.url) || (typeof iconData === 'string' && iconData.length > 0) ? (
+                                        <img src={iconData.url || getFileUrl(pb, profile, iconData)} alt="icon" className="w-full h-full object-cover" />
+                                    ) : (
+                                        <span className="pt-1" style={{ color: color }}>{name.charAt(0) || '?'}</span>
+                                    )}
+                                </div>
+                                <div className="absolute bottom-0 right-0 bg-theme rounded-full p-2 border-2 border-bg-main text-white">
+                                    <LucideIcons.Camera size={20} />
+                                </div>
+                                <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageChange} />
+                            </div>
+                        </div>
+                        <div className="space-y-6">
+                            <div>
+                                <label className="text-xs font-bold text-text-sub uppercase ml-1">ニックネーム</label>
+                                <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full bg-bg-input p-4 rounded-xl mt-2 text-text-main border border-border-main focus:border-theme focus:bg-bg-input outline-none transition-all" placeholder="ハンドルネーム" />
+                            </div>
+                            <div>
+                                <label className="text-xs font-bold text-text-sub uppercase ml-1">テーマカラー</label>
+                                <div className="flex gap-4 overflow-x-auto py-3 px-1 no-scrollbar">
+                                    {colors.map(c => (
+                                        <button key={c} type="button" onClick={() => setColor(c)} className={`w-12 h-12 rounded-full border-2 flex-shrink-0 transition-transform ${color === c ? 'border-text-main scale-110 shadow-lg' : 'border-transparent opacity-50 hover:opacity-100'}`} style={{ backgroundColor: c }} />
+                                    ))}
+                                </div>
+                            </div>
+                            <div>
+                                <label className="text-xs font-bold text-text-sub uppercase ml-1">外観モード</label>
+                                <div className="flex mt-2 bg-bg-input rounded-xl p-1 border border-border-main">
+                                    <button type="button" onClick={() => setThemeMode('dark')} className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-2 text-sm font-bold transition-all ${themeMode === 'dark' ? 'bg-bg-panel text-theme shadow-sm' : 'text-text-sub'}`}><LucideIcons.Moon size={16} /> ダーク</button>
+                                    <button type="button" onClick={() => setThemeMode('light')} className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-2 text-sm font-bold transition-all ${themeMode === 'light' ? 'bg-bg-panel text-theme shadow-sm' : 'text-text-sub'}`}><LucideIcons.Sun size={16} /> ライト</button>
+                                </div>
+                            </div>
+                            <div>
+                                <label className="text-xs font-bold text-text-sub uppercase ml-1">自己紹介</label>
+                                <textarea value={bio} onChange={(e) => setBio(e.target.value)} className="w-full bg-bg-input p-4 rounded-xl mt-2 text-text-main border border-border-main focus:border-theme focus:bg-bg-input outline-none transition-all" rows="3" placeholder="自己紹介文" />
+                            </div>
+                            {/* 
+                            <div className="flex items-center justify-between bg-bg-input p-4 rounded-xl border border-border-main">
+                                <div className="flex items-center gap-3">
+                                    <LucideIcons.Bell size={20} className={notificationsEnabled ? 'text-theme' : 'text-text-sub'} />
+                                    <div>
+                                        <div className="text-sm font-bold text-text-main">プッシュ通知</div>
+                                        <div className="text-xs text-text-sub">新着メッセージを通知します</div>
+                                    </div>
+                                </div>
+                                <button type="button" onClick={handleToggleNotifications} className={`w-12 h-6 rounded-full transition-all relative ${notificationsEnabled ? 'bg-theme' : 'bg-gray-600'}`}>
+                                    <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${notificationsEnabled ? 'left-7' : 'left-1'}`} />
+                                </button>
+                            </div>
+                            */}
+                        </div>
+
+                        <div className="mt-8">
+                            <button type="submit" className="w-full py-4 bg-theme text-white font-bold text-lg rounded-xl shadow-lg shadow-theme/30 hover:brightness-110 transition-all">保存して閉じる</button>
+                        </div>
+                    </form>
+                </div>
+            );
+        };
+
+        // 3. User Profile Modal
+        const UserProfileModal = ({ user, onClose }) => {
+            const userName = user.name || user.user_name;
+            const userIcon = user.icon || user.user_icon;
+            const userColor = user.color || user.user_color;
+            const userBio = user.bio || user.user_bio;
+
+            return (
+                <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center animate-fade-in" onClick={onClose}>
+                    <div className="bg-bg-panel w-full max-w-xs rounded-3xl p-6 border border-border-main shadow-2xl animate-slide-up" onClick={e => e.stopPropagation()}>
+                        <div className="flex justify-between items-start mb-6">
+                            <div className="flex flex-col items-center w-full">
+                                <div className="w-20 h-20 rounded-full flex items-center justify-center text-3xl font-bold border-4 border-theme shadow-lg shadow-theme/30 overflow-hidden bg-bg-main">
+                                    {userIcon ? <img src={getFileUrl(null, user, userIcon)} alt="icon" className="w-full h-full object-cover" /> : <span className="pt-1" style={{ color: userColor }}>{userName.charAt(0)}</span>}
+                                </div>
+                                <h3 className="text-xl font-bold text-text-main mt-3">{userName}</h3>
+                            </div>
+                            <button onClick={onClose} className="p-2 -mr-4 text-text-sub hover:text-text-main text-xl">✕</button>
+                        </div>
+                        <div className="text-sm bg-bg-main p-4 rounded-xl border border-border-main">
+                            <p className="text-text-sub text-xs mb-2 uppercase font-bold">自己紹介</p>
+                            <p className="text-text-main whitespace-pre-wrap">{userBio || '自己紹介文は設定されていません。'}</p>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // Image Modal
+        const ImageModal = ({ imageUrl, onClose }) => {
+            return (
+                <div className="fixed inset-0 z-[150] bg-black/90 flex items-center justify-center animate-fade-in" onClick={onClose}>
+                    <div className="relative w-full h-full flex items-center justify-center">
+                        <img
+                            src={imageUrl}
+                            alt="拡大画像"
+                            className="max-w-[95%] max-h-[95%] object-contain rounded-xl shadow-2xl transition-transform duration-300"
+                            onClick={(e) => e.stopPropagation()}
+                        />
+                        <button
+                            onClick={onClose}
+                            className="absolute top-12 right-4 p-3 bg-white/20 hover:bg-white/40 text-white rounded-full transition-colors backdrop-blur-sm"
+                        >
+                            <span className="text-xl">✕</span>
+                        </button>
+                    </div>
+                </div>
+            );
+        };
+
+        // Reaction Picker
+        const ReactionPicker = ({ message, onReact, onClose, position }) => {
+            const pickerRef = useRef(null);
+            const style = { top: position.y, left: position.x, transform: 'translate(-50%, -100%) translateY(-10px)' };
+            const handleEmojiClick = (emoji) => { onReact(message, emoji); onClose(); };
+            return (
+                <div className="reaction-picker fixed p-2 bg-bg-panel/95 backdrop-blur-md rounded-full shadow-2xl border border-border-main animate-fade-in" style={style} ref={pickerRef} onClick={e => e.stopPropagation()}>
+                    <div className="flex space-x-2">
+                        {REACTION_EMOJIS.map(emoji => (
+                            <button key={emoji} onClick={() => handleEmojiClick(emoji)} className="text-2xl hover:scale-125 transition-transform duration-150 p-1">{emoji}</button>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        // 4. Chat Room
+        const ChatRoom = ({ room, pb, profile, onBack, onOpenProfile, isEmbedded = false }) => {
+            const [messages, setMessages] = useState([]);
+            const [input, setInput] = useState('');
+            const [sending, setSending] = useState(false);
+            const [members, setMembers] = useState([]);
+            const [showMembers, setShowMembers] = useState(false);
+            const [memberRecordId, setMemberRecordId] = useState(null);
+            const [isLeaving, setIsLeaving] = useState(false);
+            const [selectedUser, setSelectedUser] = useState(null);
+            const [showImageModal, setShowImageModal] = useState(false);
+            const [modalImageUrl, setModalImageUrl] = useState('');
+            const [targetMessage, setTargetMessage] = useState(null);
+            const [pickerPosition, setPickerPosition] = useState({ x: 0, y: 0 });
+            const showToast = useToast();
+            const scrollRef = useRef(null);
+            const fileInputRef = useRef(null);
+            const memberRecordIdRef = useRef(null);
+            const joiningRef = useRef(false);
+
+            // 日時フォーマット関数（安全策）
+            const formatMessageTime = (dateStr) => {
+                if (!dateStr) return "日時不明";
+                try {
+                    // PocketBaseなどの"YYYY-MM-DD HH:mm:ss"形式を"YYYY-MM-DDTHH:mm:ss"に補正
+                    let normalizedDate = dateStr;
+                    if (typeof dateStr === 'string' && dateStr.includes(' ') && !dateStr.includes('T')) {
+                        normalizedDate = dateStr.replace(' ', 'T');
+                    }
+                    const date = new Date(normalizedDate);
+                    if (isNaN(date.getTime())) return "日時不明";
+                    return date.toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                } catch (e) {
+                    return "日時不明";
+                }
+            };
+
+            const updateMessageList = (record) => {
+                setMessages(prev => {
+                    const existingIndex = prev.findIndex(m => m.id === record.id);
+                    if (existingIndex > -1) {
+                        const newMessages = [...prev];
+                        newMessages[existingIndex] = record;
+                        return newMessages;
+                    }
+                    return [...prev, record];
+                });
+            };
+
+            const addMessage = useCallback((msg) => {
+                setMessages(prev => {
+                    // IDが既に存在する場合は何もしない
+                    if (prev.some(m => m.id === msg.id)) return prev;
+
+                    const isTemp = String(msg.id).startsWith('temp');
+                    let next = [...prev];
+
+                    if (!isTemp) {
+                        // 実メッセージが届いた場合、同じ内容の一時メッセージがあれば差し替える
+                        const tempIndex = next.findIndex(m =>
+                            String(m.id).startsWith('temp') &&
+                            m.user_id === msg.user_id &&
+                            m.text === msg.text
+                        );
+                        if (tempIndex !== -1) {
+                            next[tempIndex] = msg;
+                        } else {
+                            next.push(msg);
+                        }
+                    } else {
+                        // 一時メッセージの場合、既に同じ内容の実メッセージが（ポーリング等で）届いていないか確認
+                        const hasReal = next.some(m =>
+                            !String(m.id).startsWith('temp') &&
+                            m.user_id === msg.user_id &&
+                            m.text === msg.text
+                        );
+                        if (!hasReal) {
+                            next.push(msg);
+                        }
+                    }
+
+                    // 重複排除 (念のため最後にもう一度)
+                    const seen = new Set();
+                    next = next.filter(m => {
+                        const duplicate = seen.has(m.id);
+                        seen.add(m.id);
+                        return !duplicate;
+                    });
+
+                    return next.sort((a, b) => new Date(a.date || a.created || a.updated).getTime() - new Date(b.date || b.created || b.updated).getTime());
+                });
+
+                setTimeout(() => {
+                    if (scrollRef.current) {
+                        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+                    }
+                }, 100);
+            }, []);
+
+            const handleBack = async () => {
+                if (isLeaving) return;
+                setIsLeaving(true);
+                const targetId = memberRecordIdRef.current || memberRecordId;
+                if (targetId && pb && !isEmbedded) {
+                    try {
+                        memberRecordIdRef.current = null;
+                        await pb.collection('members').delete(targetId);
+                        showToast(`「${room.name}」から退室しました`, 'info');
+                    } catch (err) {
+                        if (err.status !== 404) console.error("Failed to delete member record:", err);
+                    }
+                }
+                onBack();
+            };
+
+            useEffect(() => {
+                if (!pb || isEmbedded || !profile.id) return;
+                const cleanupMyOldMessages = async () => {
+                    try {
+                        // 400エラー回避のため、パラメータなしで取得
+                        const result = await pb.collection('messages').getList(1, 100);
+
+                        const limitDate = new Date();
+                        limitDate.setHours(limitDate.getHours() - 48);
+
+                        const toDelete = result.items.filter(msg => {
+                            // 自分のメッセージ かつ 48時間以上前
+                            return msg.user_id === profile.id && msg.created && new Date(msg.created) < limitDate;
+                        }).map(m => m.id);
+
+                        if (toDelete.length > 0) {
+                            await Promise.all(toDelete.map(id => pb.collection('messages').delete(id).catch(() => { })));
+                        }
+                    } catch (e) { /* ignore */ }
+                };
+                cleanupMyOldMessages();
+            }, [room.id, pb, profile.id]);
+
+            const ensureMemberRecord = useCallback(async () => {
+                if (!pb || !profile || isEmbedded || joiningRef.current) return;
+                joiningRef.current = true;
+
+                try {
+                    // ★修正: フィルタ無効化、全件取得してJSで選別
+                    const allMembers = await pb.collection('members').getFullList();
+                    const existingList = allMembers.filter(m => m.user_id === profile.id && m.room === room.id);
+
+                    const commonData = {
+                        room: room.id,
+                        user_name: profile.name,
+                        user_color: profile.color,
+                        ...(profile.bio && { user_bio: profile.bio }),
+                        ...(profile.icon && { user_icon: profile.icon })
+                    };
+
+                    if (existingList.length > 0) {
+                        const record = existingList[0];
+                        if (existingList.length > 1) {
+                            for (let i = 1; i < existingList.length; i++) {
+                                pb.collection('members').delete(existingList[i].id).catch(() => { });
+                            }
+                        }
+                        try {
+                            const formData = new FormData();
+                            formData.append("user_name", profile.name);
+                            formData.append("user_color", profile.color);
+                            if (profile.bio) formData.append("user_bio", profile.bio);
+
+                            // 修正: アイコン本体(Blob)がある場合のみアップロード
+                            if (profile.icon && typeof profile.icon === 'object' && profile.icon.blob instanceof Blob) {
+                                formData.append("user_icon", profile.icon.blob, "icon.jpg");
+                            } else if (profile.icon instanceof Blob) {
+                                formData.append("user_icon", profile.icon, "icon.jpg");
+                            }
+                            // ★ポイント: Blobがない場合はuser_iconをformDataに含めず、サーバー側の現在の値を維持させる
+
+                            const updated = await pb.collection('members').update(record.id, formData);
+                            setMemberRecordId(updated.id);
+                            memberRecordIdRef.current = updated.id;
+                        } catch (updateErr) {
+                            if (updateErr.status !== 404) throw updateErr;
+                        }
+                    }
+
+                    if (!memberRecordIdRef.current) {
+                        try {
+                            const formData = new FormData();
+                            formData.append("room", room.id);
+                            formData.append("user_name", profile.name);
+                            formData.append("user_color", profile.color);
+                            formData.append("user_id", profile.id);
+                            if (profile.bio) formData.append("user_bio", profile.bio);
+                            if (profile.icon && typeof profile.icon === 'object' && profile.icon.blob instanceof Blob) {
+                                formData.append("user_icon", profile.icon.blob, "icon.jpg");
+                            } else if (profile.icon instanceof Blob) {
+                                formData.append("user_icon", profile.icon, "icon.jpg");
+                            }
+                            // 文字列の場合は送信せずサーバー側の既存（もしあれば）を維持
+
+                            const created = await pb.collection('members').create(formData);
+                            setMemberRecordId(created.id);
+                            memberRecordIdRef.current = created.id;
+                        } catch (createErr) {
+                            console.warn("Create failed, retrying update...", createErr);
+                            const allMembersRetry = await pb.collection('members').getFullList();
+                            const retryList = allMembersRetry.filter(m => m.user_id === profile.id && m.room === room.id);
+
+                            if (retryList.length > 0) {
+                                const formDataRetry = new FormData();
+                                formDataRetry.append("room", room.id);
+                                formDataRetry.append("user_name", profile.name);
+                                formDataRetry.append("user_color", profile.color);
+                                if (profile.bio) formDataRetry.append("user_bio", profile.bio);
+                                if (profile.icon && typeof profile.icon === 'object' && profile.icon.blob instanceof Blob) {
+                                    formDataRetry.append("user_icon", profile.icon.blob, "icon.jpg");
+                                } else if (profile.icon instanceof Blob) {
+                                    formDataRetry.append("user_icon", profile.icon, "icon.jpg");
+                                } else if (typeof profile.icon === 'string') {
+                                    formDataRetry.append("user_icon", profile.icon);
+                                }
+                                const retryUpdate = await pb.collection('members').update(retryList[0].id, formDataRetry);
+                                setMemberRecordId(retryUpdate.id);
+                                memberRecordIdRef.current = retryUpdate.id;
+                            }
+                        }
+                    }
+                } catch (err) {
+                    console.error("ensureMemberRecord failed:", err);
+                } finally {
+                    joiningRef.current = false;
+                    loadMembers(false);
+                }
+            }, [room.id, pb, profile, isEmbedded]);
+
+            useEffect(() => {
+                if (!pb || isEmbedded) return;
+                const sendHeartbeat = async () => {
+                    const targetId = memberRecordIdRef.current;
+                    if (targetId) {
+                        try { await pb.collection('members').update(targetId, {}); }
+                        catch (e) {
+                            console.warn("Heartbeat update failed, repairing...", e);
+                            memberRecordIdRef.current = null;
+                            setMemberRecordId(null);
+                            ensureMemberRecord();
+                        }
+                    } else {
+                        ensureMemberRecord();
+                    }
+                };
+
+                const handleUnload = () => {
+                    const targetId = memberRecordIdRef.current;
+                    if (targetId && pb && !isEmbedded) {
+                        // ブラウザ終了時に削除を試みる
+                        const url = `${SERVER_URL}/api/collections/members/records/${targetId}`;
+                        if (navigator.sendBeacon) {
+                            // PocketBaseは _method 引数で DELETE を擬似的に行える場合があるが、
+                            // 確実なのは fetch + keepalive: true
+                            fetch(url, { method: 'DELETE', keepalive: true, headers: { 'X-Token': pb.authStore.token } }).catch(() => { });
+                        }
+                    }
+                };
+
+                const heartbeatTimer = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS);
+                const handleVisibilityChange = () => {
+                    if (document.visibilityState === 'visible') setTimeout(sendHeartbeat, 1000);
+                };
+                document.addEventListener('visibilitychange', handleVisibilityChange);
+                window.addEventListener('beforeunload', handleUnload);
+
+                return () => {
+                    clearInterval(heartbeatTimer);
+                    document.removeEventListener('visibilitychange', handleVisibilityChange);
+                    window.removeEventListener('beforeunload', handleUnload);
+
+                    // コンポーネントのアンマウント時（部屋移動時など）にも削除を試みる
+                    // ただし isLeaving が true の場合は handleBack が既に実行中なのでスキップ
+                    if (memberRecordIdRef.current && !isLeaving) {
+                        const targetId = memberRecordIdRef.current;
+                        memberRecordIdRef.current = null;
+                        pb.collection('members').delete(targetId).catch(() => { });
+                    }
+                };
+            }, [ensureMemberRecord, pb, isEmbedded, isLeaving]);
+
+            const profileRef = useRef(profile);
+            useEffect(() => { profileRef.current = profile; }, [profile]);
+
+            useEffect(() => {
+                if (!pb) return;
+                let isCancelled = false;
+                let unsubscribeMembers = null;
+                let unsubscribeMessages = null;
+                let retryTimeout = null;
+
+                const loadMessages = async () => {
+                    if (isCancelled) return;
+                    try {
+                        const countRes = await pb.collection('messages').getList(1, 1);
+                        if (isCancelled) return;
+
+                        const total = countRes.totalItems;
+                        const perPage = 50;
+                        const lastPage = Math.max(1, Math.ceil(total / perPage));
+
+                        const result = await pb.collection('messages').getList(lastPage, perPage);
+                        if (isCancelled) return;
+
+                        let allItems = result.items;
+                        if (lastPage > 1) {
+                            try {
+                                const prevPage = await pb.collection('messages').getList(lastPage - 1, perPage);
+                                allItems = [...prevPage.items, ...allItems];
+                            } catch (e) { }
+                        }
+
+                        const items = allItems
+                            .filter(m => m.room === room.id)
+                            .sort((a, b) => new Date(a.created).getTime() - new Date(b.created).getTime());
+
+                        setMessages(prev => {
+                            // ポーリングで取得した実データで既存の状態を更新（一時メッセージは維持する）
+                            const next = [...prev];
+                            const tempMessages = next.filter(m => String(m.id).startsWith('temp'));
+                            const realMessagesMap = new Map();
+
+                            // サーバーからのデータをマップに格納（ID重複排除）
+                            items.forEach(m => realMessagesMap.set(m.id, m));
+
+                            // 一時メッセージのうち、サーバー側で既に実データが存在するものを除外
+                            const activeTemp = tempMessages.filter(t =>
+                                !items.some(m => m.user_id === t.user_id && m.text === t.text)
+                            );
+
+                            const combined = [...realMessagesMap.values(), ...activeTemp];
+                            return combined.sort((a, b) => new Date(a.date || a.created || a.updated).getTime() - new Date(b.date || b.created || b.updated).getTime());
+                        });
+
+                        setTimeout(() => { if (scrollRef.current && !isCancelled) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, 100);
+                        loadMembers(false);
+                    } catch (err) {
+                        if (!isCancelled) console.error("Load messages failed:", err);
+                    }
+                };
+
+                const subscribeAll = async () => {
+                    if (isCancelled) return;
+                    console.log(`[Subscription] Attempting to subscribe to room: ${room.id}`);
+                    try {
+                        // 既存の購読を確実に解除（二重登録防止）
+                        if (unsubscribeMembers) { unsubscribeMembers(); unsubscribeMembers = null; }
+                        if (unsubscribeMessages) { unsubscribeMessages(); unsubscribeMessages = null; }
+
+                        // 1. メンバー購読
+                        unsubscribeMembers = await pb.collection('members').subscribe('*', (e) => {
+                            if (isCancelled) return;
+                            loadMembers(false);
+                        });
+
+                        // 2. メッセージ購読 (Wildcard)
+                        unsubscribeMessages = await pb.collection('messages').subscribe('*', (e) => {
+                            if (isCancelled) return;
+                            if (e.record.room !== room.id) return;
+
+                            if (e.action === 'create') {
+                                addMessage(e.record);
+                                loadMembers(false);
+                            } else if (e.action === 'update') {
+                                updateMessageList(e.record);
+                            }
+                        });
+
+                        if (!isCancelled) clearTimeout(retryTimeout);
+                    } catch (err) {
+                        if (isCancelled) return;
+                        // status 0 は通信断やタイムアウト（EventSourceエラー）
+                        const isTimeout = err.status === 0 || (err.message && err.message.includes('timeout'));
+                        console.warn(`PocketBase Realtime Subscription ${isTimeout ? 'Timeout' : 'Failed'}:`, err);
+
+                        // 再試行（タイムアウト時は少し長めに待つ）
+                        clearTimeout(retryTimeout);
+                        const delay = isTimeout ? 10000 : 3000;
+                        retryTimeout = setTimeout(subscribeAll, delay);
+                    }
+                };
+
+                // 初回読み込み
+                loadMessages();
+                // 接続直後の負荷を避けるため、わずかに遅延させて購読開始
+                const initTimeout = setTimeout(subscribeAll, 500);
+                const intervalId = setInterval(loadMessages, 10000);
+
+                return () => {
+                    isCancelled = true;
+                    clearInterval(intervalId);
+                    clearTimeout(retryTimeout);
+                    clearTimeout(initTimeout);
+                    if (unsubscribeMembers) unsubscribeMembers();
+                    if (unsubscribeMessages) unsubscribeMessages();
+                };
+            }, [room.id, pb]);
+
+            const loadMembers = async (openModal = false) => {
+                if (!pb) return;
+                try {
+                    let activeRecords = [];
+                    try {
+                        // ★修正: フィルタ無効化、全件取得してJSで選別
+                        const allRecords = await pb.collection('members').getFullList();
+                        const roomMembers = allRecords.filter(r => r.room === room.id);
+                        const systemProfiles = allRecords.filter(r => r.room === 'SYSTEM_PROFILE');
+
+                        const enrichMember = (m) => {
+                            const sp = systemProfiles.find(s => s.user_id === m.user_id);
+                            if (sp) {
+                                return { ...m, last_member_id: sp.id, user_icon: sp.user_icon || m.user_icon };
+                            }
+                            return m;
+                        };
+
+                        const now = Date.now();
+                        // updatedがある場合のみ時間チェック（なければ全員表示）
+                        activeRecords = roomMembers.filter(r => {
+                            if (!r.updated) return true;
+                            return (now - new Date(r.updated).getTime()) < GHOST_TIMEOUT_MS;
+                        }).map(enrichMember);
+                    } catch (e) {
+                        console.warn("Failed to fetch members collection:", e);
+                    }
+
+                    const recentChatters = [];
+                    const now = Date.now();
+                    messages.forEach(msg => {
+                        if (msg.user_id && msg.user_name) {
+                            // createdがある場合のみ時間チェック
+                            if (msg.created) {
+                                const msgTime = new Date(msg.created).getTime();
+                                if ((now - msgTime) < GHOST_TIMEOUT_MS) {
+                                    recentChatters.push({
+                                        id: 'msg_ghost_' + msg.user_id,
+                                        user_id: msg.user_id,
+                                        user_name: msg.user_name,
+                                        user_icon: msg.user_icon,
+                                        user_color: msg.user_color,
+                                        user_bio: msg.user_bio,
+                                        updated: msg.created,
+                                        is_fallback: true
+                                    });
+                                }
+                            }
+                        }
+                    });
+
+                    const uniqueMembers = [];
+                    const seen = new Set();
+
+                    const addToList = (list) => {
+                        list.forEach(m => {
+                            if (!seen.has(m.user_id)) {
+                                seen.add(m.user_id);
+                                const enriched = (typeof enrichMember === 'function') ? enrichMember(m) : m;
+                                uniqueMembers.push(enriched);
+                            }
+                        });
+                    };
+
+                    addToList(activeRecords);
+                    addToList(recentChatters);
+
+                    if (profile && !seen.has(profile.id)) {
+                        uniqueMembers.unshift({
+                            id: 'local_me_' + Date.now(),
+                            user_id: profile.id,
+                            user_name: profile.name,
+                            user_icon: profile.icon,
+                            user_color: profile.color,
+                            user_bio: profile.bio,
+                            updated: new Date().toISOString()
+                        });
+                    }
+
+                    setMembers(uniqueMembers);
+                    if (openModal) setShowMembers(true);
+                } catch (err) { console.error("loadMembers error:", err); }
+            };
+
+            useEffect(() => {
+                loadMembers(false);
+            }, [room.id]);
+
+            const handleSend = async () => {
+                if (!input.trim() || !pb) return;
+                const text = input.trim();
+                setSending(true);
+
+                // ★修正: タイムスタンプを1つ生成して統一
+                const now = new Date();
+                const nowISO = now.toISOString();
+
+                const tempId = 'temp_' + Date.now();
+                const tempMessage = {
+                    id: tempId,
+                    text: text,
+                    room: room.id,
+                    user_id: profile.id,
+                    user_name: profile.name,
+                    user_color: profile.color,
+                    user_bio: profile.bio,
+                    user_icon: profile.icon,
+                    created: nowISO,
+                    updated: nowISO,
+                    date: nowISO
+                };
+                addMessage(tempMessage);
+                setInput('');
+
+                try {
+                    const sendData = {
+                        text,
+                        room: room.id,
+                        user_id: profile.id,
+                        user_name: profile.name,
+                        user_color: profile.color,
+                        date: nowISO,
+                    };
+
+                    await pb.collection('messages').create(sendData);
+                } catch (e) {
+                    console.error("Send failed:", e);
+                    const details = e.data?.data ? Object.keys(e.data.data).join(', ') : e.message;
+                    showToast(`送信エラー: ${details}`, 'error');
+                } finally {
+                    setSending(false);
+                }
+            };
+
+            const handleImageUpload = async (e) => {
+                const file = e.target.files[0];
+                if (!file || !pb) return;
+                setSending(true);
+
+                // ★修正: タイムスタンプ生成
+                const now = new Date();
+                const nowISO = now.toISOString();
+
+                resizeImage(file, 240, 0.6).then(async (blob) => {
+                    const previewUrl = URL.createObjectURL(blob);
+                    const tempId = 'temp_img_' + Date.now();
+                    const tempMessage = {
+                        id: tempId,
+                        text: '🖼️ 写真が投稿されました',
+                        image: previewUrl,
+                        room: room.id,
+                        user_id: profile.id,
+                        user_name: profile.name,
+                        user_color: profile.color,
+                        user_bio: profile.bio,
+                        user_icon: profile.icon,
+                        created: nowISO,
+                        updated: nowISO,
+                        date: nowISO
+                    };
+                    addMessage(tempMessage);
+                    showToast('画像を投稿しました', 'success');
+
+                    try {
+                        const formData = new FormData();
+                        formData.append("text", '🖼️ 写真が投稿されました');
+                        formData.append("image", blob, "upload.jpg");
+                        formData.append("room", room.id);
+                        formData.append("user_id", profile.id);
+                        formData.append("user_name", profile.name);
+                        formData.append("user_color", profile.color);
+                        formData.append("date", nowISO);
+
+                        await pb.collection('messages').create(formData);
+                        URL.revokeObjectURL(previewUrl);
+                    } catch (e) {
+                        console.error("Image upload failed", e);
+                        showToast("画像のアップロードに失敗しました", "error");
+                    }
+                }).finally(() => { setSending(false); e.target.value = null; });
+            };
+
+            const handleUserClick = (msg) => {
+                if (msg.user_id === CHINCHIRO_BOT_PROFILE.id) { setSelectedUser(CHINCHIRO_BOT_PROFILE); return; }
+                if (msg.user_id === profile.id) return;
+                setSelectedUser({ user_id: msg.user_id, user_name: msg.user_name, user_icon: msg.user_icon, user_color: msg.user_color, user_bio: msg.user_bio });
+            };
+
+            const openReactionPicker = (e, msg) => {
+                e.stopPropagation();
+                if (msg.user_id === profile.id || msg.user_id === CHINCHIRO_BOT_PROFILE.id) { setTargetMessage(null); return; }
+                const rect = e.currentTarget.getBoundingClientRect();
+                setPickerPosition({ x: rect.left + rect.width / 2, y: rect.top });
+                setTargetMessage(msg);
+            };
+
+            const handleReact = async (msg, emoji) => {
+                if (!pb || !msg) return;
+                let reactions = {};
+                try {
+                    const data = msg.reactions_data;
+                    if (data && typeof data === 'string') reactions = JSON.parse(data);
+                    else if (data && typeof data === 'object') reactions = data;
+                } catch (e) { reactions = {}; }
+                const userId = profile.id;
+                if (reactions[emoji] && reactions[emoji].includes(userId)) {
+                    reactions[emoji] = reactions[emoji].filter(id => id !== userId);
+                    if (reactions[emoji].length === 0) delete reactions[emoji];
+                } else {
+                    Object.keys(reactions).forEach(key => {
+                        reactions[key] = reactions[key].filter(id => id !== userId);
+                        if (reactions[key].length === 0) delete reactions[key];
+                    });
+                    if (!reactions[emoji]) reactions[emoji] = [];
+                    reactions[emoji].push(userId);
+                }
+
+                try {
+                    const updatedRecord = await pb.collection('messages').update(msg.id, {
+                        reactions_data: JSON.stringify(reactions)
+                    });
+                    updateMessageList(updatedRecord);
+                    setTargetMessage(null);
+                } catch (err) {
+                    console.error("Failed to update reaction:", err.status, err.response);
+                    showToast('リアクションの更新に失敗しました', 'error');
+                }
+            };
+
+            useEffect(() => {
+                const closePicker = () => setTargetMessage(null);
+                document.addEventListener('click', closePicker);
+                return () => document.removeEventListener('click', closePicker);
+            }, []);
+
+            return (
+                <div className={`bg-bg-main ${isEmbedded ? 'relative flex flex-col w-full h-full' : 'absolute inset-0 z-10 animate-fade-in h-dvh-fix'}`}>
+                    <header className={`glass z-40 transition-all safe-top ${isEmbedded ? 'hidden' : 'fixed top-0 left-0 right-0'}`}>
+                        <div className="h-16 flex items-center justify-between px-4">
+                            {!isEmbedded && <button onClick={handleBack} className="p-2 -mr-2 text-text-sub hover:text-theme transition-colors"><LucideIcons.ArrowLeft size={24} /></button>}
+                            <div className="w-px h-6 bg-border-main mx-2" />
+                            <div className="flex items-center">
+                                <button onClick={() => loadMembers(true)} className="p-2 mr-2 text-theme hover:text-white transition-colors"><LucideIcons.Users size={24} /></button>
+                                <button onClick={onOpenProfile} className="relative group transition-transform active:scale-95">
+                                    <div className="w-8 h-8 rounded-full border-2 border-theme p-0.5 flex items-center justify-center overflow-hidden bg-bg-panel">
+                                        {profile && profile.icon ? <img src={getFileUrl(pb, profile, profile.icon)} alt="me" className="w-full h-full object-cover rounded-full" /> : <span className="font-bold text-sm text-theme pt-1">{profile && profile.name ? profile.name[0] : '?'}</span>}
+                                    </div>
+                                </button>
+                            </div>
+                        </div>
+                    </header>
+
+                    {isEmbedded && (
+                        <div className="p-4 flex justify-between items-center bg-bg-main/80 backdrop-blur-sm z-30 sticky top-0 border-b border-border-main">
+                            <h2 className="font-bold text-sm text-text-sub uppercase tracking-widest flex items-center gap-2">
+                                <LucideIcons.MessageSquare size={16} className="text-theme" /> {room.name}
+                            </h2>
+                            <button onClick={() => loadMembers(true)} className="p-2 -mr-2 text-text-sub hover:text-theme transition-colors">
+                                <LucideIcons.Users size={20} />
+                            </button>
+                        </div>
+                    )}
+
+                    {
+                        targetMessage && (
+                            <ReactionPicker message={targetMessage} onReact={handleReact} onClose={() => setTargetMessage(null)} position={pickerPosition} />
+                        )
+                    }
+
+                    <div ref={scrollRef} className={`overflow-y-auto space-y-4 ${isEmbedded ? 'flex-1 p-4 pb-40' : 'absolute inset-0 p-4 pt-20 pb-40'} flex flex-col`}>
+                        {messages.length === 0 && <div className="h-full flex items-center justify-center text-text-sub opacity-50">メッセージがありません</div>}
+                        {messages.map((msg, i) => {
+                            const isMe = msg.user_id === profile.id;
+                            const isBot = msg.user_id.startsWith('bot_');
+                            const isTemp = msg.id && msg.id.startsWith('temp_');
+
+                            let reactions = {};
+                            try {
+                                const data = msg.reactions_data;
+                                if (data && typeof data === 'string') reactions = JSON.parse(data);
+                                else if (data && typeof data === 'object') reactions = data;
+                            } catch (e) { /* ignore */ }
+                            const reactionEntries = Object.entries(reactions).filter(([_, ids]) => ids.length > 0);
+
+                            const showAvatar = i === 0 || messages[i - 1].user_id !== msg.user_id;
+
+                            const memberInfo = members.find(m => m.user_id === msg.user_id);
+                            // 修正: messagesコレクションにはファイルが存在しないため、membersレコード(memberInfo)を優先
+                            const displayIcon = (memberInfo && getFileUrl(pb, memberInfo, memberInfo.user_icon)) || (isMe ? getFileUrl(pb, profile, profile.icon) : null);
+                            const displayColor = msg.user_color || (memberInfo && memberInfo.user_color) || (isMe ? profile.color : '#ccc');
+                            const displayName = msg.user_name || (memberInfo && memberInfo.user_name) || (isMe ? profile.name : 'Unknown');
+
+                            return (
+                                <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'} animate-slide-in-new-message ${isTemp ? 'opacity-70' : ''}`}>
+                                    {!isMe && (
+                                        <div className="w-10 flex-shrink-0 mr-2 flex flex-col items-center">
+                                            {showAvatar && (
+                                                <div className="w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold border border-border-main overflow-hidden bg-bg-panel cursor-pointer" style={{ borderColor: isBot ? displayColor : 'var(--border-main)' }} onClick={() => handleUserClick(msg)}>
+                                                    {displayIcon ? <img src={displayIcon} className="w-full h-full object-cover" /> : <span className="pt-1" style={{ color: displayColor }}>{(displayName && displayName[0])}</span>}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                    <div className={`max-w-[75%]`}>
+                                        {!isMe && showAvatar && <div className="text-xs text-text-sub mb-1 ml-1" style={{ color: isBot ? displayColor : 'var(--text-sub)' }}>{displayName}</div>}
+                                        <div className={`px-4 py-3 text-sm shadow-md ${isMe ? 'bg-theme text-white font-medium rounded-2xl rounded-tr-sm' : isBot ? 'bg-gray-700/80 text-white rounded-2xl rounded-tl-sm border border-gray-600' : 'bg-bg-panel text-text-main rounded-2xl rounded-tl-sm border border-border-main'}`} onClick={(e) => openReactionPicker(e, msg)}>
+                                            {msg.image ? (
+                                                <div className="space-y-2">
+                                                    <img src={getFileUrl(pb, msg, msg.image)} className="max-w-full h-auto max-h-60 object-contain rounded-lg shadow-sm" onClick={(e) => { e.stopPropagation(); setModalImageUrl(getFileUrl(pb, msg, msg.image)); setShowImageModal(true); }} />
+                                                    {msg.text && msg.text !== '🖼️ 写真が投稿されました' && <div className="text-xs mt-1">{renderTextWithLinks(msg.text)}</div>}
+                                                </div>
+                                            ) : (
+                                                <div className="whitespace-pre-wrap leading-relaxed">{renderTextWithLinks(msg.text)}</div>
+                                            )}
+                                        </div>
+                                        {reactionEntries.length > 0 && (
+                                            <div className={`mt-1 flex gap-1 ${isMe ? 'justify-end' : 'justify-start'}`}>
+                                                {reactionEntries.map(([emoji, userIds]) => {
+                                                    const reactedByMe = userIds.includes(profile.id);
+                                                    return (
+                                                        <button key={emoji} className={`text-xs px-2 py-0.5 rounded-full border shadow-sm transition-all duration-150 active:scale-[0.9] ${reactedByMe ? 'bg-theme text-white border-theme' : 'bg-bg-panel text-text-main border-border-main'}`} onClick={(e) => { e.stopPropagation(); handleReact(msg, emoji); }}>
+                                                            {emoji} {userIds.length}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+                                        <div className="text-[10px] text-text-sub mt-1 text-right">
+                                            {isTemp ? '送信中...' : formatMessageTime(msg.date || msg.created || msg.updated)}
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    <div className={`p-3 glass z-40 transition-all fixed left-0 right-0 ${isEmbedded ? 'bottom-16 border-t border-border-main' : 'bottom-0 safe-bottom'}`}>
+                        <div className="flex items-end gap-3 max-w-4xl mx-auto">
+                            <button onClick={() => fileInputRef.current.click()} disabled={sending} className="p-3 text-text-sub bg-bg-input rounded-xl hover:text-theme transition-colors active:scale-95"><LucideIcons.Image size={22} /></button>
+                            <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
+                            <div className="flex-1 bg-bg-input rounded-2xl border border-border-main focus-within:border-theme flex items-center">
+                                <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }} placeholder={sending ? "..." : "メッセージ..."} rows="1" disabled={sending} className="w-full bg-transparent text-text-main px-4 py-3 focus:outline-none resize-none" style={{ minHeight: '48px', maxHeight: '100px' }} />
+                            </div>
+                            <button onClick={handleSend} disabled={sending || !input.trim()} className={`p-3 rounded-xl shadow-lg ${input.trim() && !sending ? 'bg-theme text-white' : 'bg-gray-700 text-gray-500 cursor-not-allowed opacity-50'}`}><LucideIcons.Send size={22} /></button>
+                        </div>
+                    </div>
+
+                    {
+                        showMembers && (
+                            <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-end sm:items-center sm:justify-center p-4" onClick={() => setShowMembers(false)}>
+                                <div className="bg-bg-panel w-full max-w-sm rounded-3xl overflow-hidden max-h-[70%] flex flex-col border border-border-main" onClick={e => e.stopPropagation()}>
+                                    <div className="p-4 border-b border-border-main flex justify-between items-center bg-bg-input"><h3 className="font-bold">参加メンバー</h3><button onClick={() => setShowMembers(false)}>✕</button></div>
+                                    <div className="overflow-y-auto p-2">
+                                        {members.map(m => (
+                                            <div key={m.id} className="flex items-center p-3 hover:bg-bg-input rounded-xl cursor-pointer" onClick={() => { setShowMembers(false); handleUserClick(m); }}>
+                                                <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold mr-3 border border-border-main overflow-hidden bg-bg-panel">{m.user_icon ? <img src={getFileUrl(pb, m, m.user_icon)} className="w-full h-full object-cover" /> : <span className="pt-1" style={{ color: m.user_color }}>{(m.user_name && m.user_name[0])}</span>}</div>
+                                                <div><div className="font-bold text-sm">{m.user_name}</div><div className="text-xs text-text-sub truncate">{m.user_bio || 'No bio'}</div></div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        )
+                    }
+
+                    {selectedUser && <UserProfileModal user={selectedUser} onClose={() => setSelectedUser(null)} />}
+                    {showImageModal && <ImageModal imageUrl={modalImageUrl} onClose={() => setShowImageModal(false)} />}
+                </div>
+            );
+        };
+
+        // 5. Lobby
+        const Lobby = ({ onChangeRoom, onOpenProfile, profile, pb, currentTab, onTabChange }) => {
+            const [roomStats, setRoomStats] = useState({});
+            const [showTermsModal, setShowTermsModal] = useState(false);
+
+            useEffect(() => {
+                if (!pb || !profile) return;
+                const fetchStats = async () => {
+                    try {
+                        const records = await pb.collection('members').getFullList();
+                        const now = Date.now();
+                        const active = records.filter(r => {
+                            if (!r.updated) return true;
+                            // SYSTEM_PROFILEは統計に含めない
+                            if (r.room === 'SYSTEM_PROFILE') return false;
+                            return (now - new Date(r.updated).getTime()) < GHOST_TIMEOUT_MS;
+                        });
+
+                        const stats = {};
+                        active.forEach(r => {
+                            if (!stats[r.room]) stats[r.room] = { count: 0, users: [] };
+                            if (!stats[r.room].users.some(u => u.user_id === r.user_id)) {
+                                stats[r.room].count++;
+                                if (stats[r.room].users.length < 5) stats[r.room].users.push(r);
+                            }
+                        });
+                        setRoomStats(stats);
+                    } catch (e) { }
+                };
+
+                fetchStats();
+                const timer = setInterval(fetchStats, 5000);
+                return () => clearInterval(timer);
+            }, [pb, profile, currentTab]);
+
+            const handleEnterRoom = (room) => {
+                const currentCount = (roomStats[room.id] && roomStats[room.id].count) || 0;
+                if (currentCount >= 10) {
+                    return;
+                }
+                onChangeRoom(room);
+            };
+
+            return (
+                <div className="flex flex-col overflow-hidden animate-fade-in bg-bg-main relative h-dvh-fix">
+                    <header className="bg-bg-main border-b border-border-main safe-top">
+                        <div className="p-4 flex justify-between items-center">
+                            <div className="flex items-center gap-2">
+                                <img src="icon.svg" alt="paka-paka" className="w-8 h-8" />
+                                <div>
+                                    <h1 className="text-2xl font-bold text-text-main tracking-wide">
+                                        paka-paka
+                                    </h1>
+                                </div>
+                            </div>
+                            <button onClick={onOpenProfile} className="relative group transition-transform active:scale-95">
+                                <div className="w-10 h-10 rounded-full border-2 border-theme p-0.5 flex items-center justify-center overflow-hidden bg-bg-panel shadow-[0_0_10px_rgba(var(--theme-color),0.3)]">
+                                    {profile && profile.icon ? <img src={getFileUrl(pb, profile, profile.icon)} alt="me" className="w-full h-full object-cover rounded-full" /> : <span className="font-bold text-lg text-theme pt-1">{profile && profile.name ? profile.name[0] : '?'}</span>}
+                                </div>
+                            </button>
+                        </div>
+                    </header>
+
+                    <div className="flex-1 flex flex-col overflow-hidden relative pb-16">
+                        {currentTab === 'board' ? (
+                            <ChatRoom room={{ id: 'general', name: 'オープン掲示板' }} pb={pb} profile={profile} isEmbedded={true} onOpenProfile={onOpenProfile} />
+                        ) : (
+                            <div className="flex-1 overflow-y-auto p-4 animate-fade-in">
+                                <div className="mb-4 text-center">
+                                    <button
+                                        onClick={() => setShowTermsModal(true)}
+                                        className="inline-flex items-center gap-2 text-xs font-bold text-text-sub hover:text-theme transition-colors p-2 rounded-lg bg-bg-panel border border-border-main"
+                                    >
+                                        <LucideIcons.FileText size={16} />
+                                        利用規約・プライバシーポリシー
+                                    </button>
+                                </div>
+
+                                <div className="grid gap-4">
+                                    {ROOMS.map(room => {
+                                        const Icon = ROOM_ICONS[room.id] || Icons.MessageSquare;
+                                        const stats = roomStats[room.id] || { count: 0, users: [] };
+                                        return (
+                                            <div key={room.id} onClick={() => handleEnterRoom(room)} className={`relative group cursor-pointer overflow-hidden rounded-2xl bg-bg-panel border border-border-main transition-all duration-300 active:scale-[0.98] ${stats.count >= 10 ? 'opacity-50' : 'hover:border-theme'}`}>
+                                                <div className="absolute inset-0 bg-gradient-to-r from-theme to-transparent opacity-0 group-hover:opacity-5 transition-opacity"></div>
+                                                <div className="p-5">
+                                                    <div className="flex items-center space-x-4 mb-3">
+                                                        <div className="p-3 rounded-xl bg-bg-input text-theme border border-border-main"><Icon size={24} /></div>
+                                                        <div>
+                                                            <h3 className="text-lg font-bold text-text-main group-hover:text-theme transition-colors">{room.name}</h3>
+                                                            <p className="text-xs text-text-sub mt-1">{room.desc}</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex justify-between items-end border-t border-border-main pt-3 mt-2">
+                                                        <div className="flex -space-x-2">
+                                                            {stats.users.map((u, idx) => {
+                                                                return (
+                                                                    <div key={idx} className="w-6 h-6 rounded-full border border-bg-main bg-bg-input flex items-center justify-center overflow-hidden text-[10px] font-bold relative z-10">
+                                                                        {u.user_icon ? (
+                                                                            <img src={getFileUrl(pb, u, u.user_icon)} className="w-full h-full object-cover" />
+                                                                        ) : (
+                                                                            <span className="pt-0.5" style={{ color: u.user_color }}>{(u.user_name && u.user_name[0]) || '?'}</span>
+                                                                        )}
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                            {stats.count === 0 && <span className="text-xs text-text-sub">No users</span>}
+                                                        </div>
+                                                        <div className={`text-xs font-mono font-bold ${stats.count >= 10 ? 'text-red-500' : 'text-theme'}`}>
+                                                            <span className="text-lg">{stats.count}</span>/10
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    <nav className="fixed bottom-0 left-0 right-0 bg-bg-main border-t border-border-main flex justify-around safe-bottom z-50 pt-2 pb-1">
+                        <button onClick={() => onTabChange('board')} className={`flex flex-col items-center justify-center w-full py-1 transition-colors ${currentTab === 'board' ? 'text-theme' : 'text-text-sub hover:text-text-main'}`}>
+                            <LucideIcons.MessageSquare size={24} /> <span className="text-[10px] mt-1 font-bold">掲示板</span>
+                        </button>
+                        <button onClick={() => onTabChange('rooms')} className={`flex flex-col items-center justify-center w-full py-1 transition-colors ${currentTab === 'rooms' ? 'text-theme' : 'text-text-sub hover:text-text-main'}`}>
+                            <LucideIcons.LayoutGrid size={24} /> <span className="text-[10px] mt-1 font-bold">部屋</span>
+                        </button>
+                    </nav>
+
+                    {showTermsModal && <TermsModal onClose={() => setShowTermsModal(false)} />}
+                </div>
+            );
+        };
+
+        // --- Main App ---
+        const App = () => {
+            const [pbUrl, setPbUrl] = useState(SERVER_URL || localStorage.getItem('pb_url'));
+            const [pb, setPb] = useState(null);
+            const [profile, setProfile] = useState(null);
+            const [currentRoom, setCurrentRoom] = useState(null);
+            const [isEditingProfile, setIsEditingProfile] = useState(false);
+            const [lastLobbyTab, setLastLobbyTab] = useState('board');
+
+            // グローバルなメッセージクリーンアップ関数
+            const cleanupOldMessagesGlobally = useCallback(async (client) => {
+                if (!client) return;
+                try {
+                    const cutoffDate = new Date();
+                    // 48時間（2日）前に設定
+                    cutoffDate.setHours(cutoffDate.getHours() - 48);
+                    const cutoffISO = cutoffDate.toISOString();
+
+                    console.log(`[Cleanup] Starting global cleanup. Messages older than ${cutoffISO} will be deleted.`);
+                    // サーバー側フィルタ・ソートで400エラーが出る環境のため、一切のパラメータを外して取得
+                    const oldMessages = await client.collection('messages').getList(1, 500);
+
+                    // JS側で日付チェック
+                    const toDeleteItems = oldMessages.items.filter(msg => {
+                        return msg.created && msg.created < cutoffISO;
+                    });
+
+                    if (toDeleteItems.length > 0) {
+                        console.log(`[Cleanup] Found ${toDeleteItems.length} messages to delete.`);
+                        // 見つかったメッセージをすべて削除
+                        await Promise.all(toDeleteItems.map(msg =>
+                            client.collection('messages').delete(msg.id).catch(err => {
+                                console.warn(`[Cleanup] Failed to delete message ${msg.id}:`, (err.response && err.response.message) || err);
+                            })
+                        ));
+                        console.log(`[Cleanup] Successfully processed deletion of ${toDeleteItems.length} old messages.`);
+                    } else {
+                        console.log(`[Cleanup] No messages found older than 48 hours.`);
+                    }
+                } catch (e) {
+                    console.error("[Cleanup] Global cleanup failed:", e);
+                }
+            }, []);
+
+            useEffect(() => {
+                const savedMode = localStorage.getItem('theme_mode');
+                if (savedMode === 'light') document.documentElement.setAttribute('data-theme', 'light');
+
+                if (pbUrl) {
+                    try {
+                        const client = new PocketBase(pbUrl);
+                        client.autoCancellation(false);
+                        setPb(client);
+
+                        cleanupOldMessagesGlobally(client);
+
+                        const savedProfile = localStorage.getItem('chat_profile');
+                        if (savedProfile) {
+                            const p = JSON.parse(savedProfile);
+                            setProfile(p);
+                            if (p.color) document.documentElement.style.setProperty('--theme-color', p.color);
+                        }
+                        else {
+                            setIsEditingProfile(true);
+                            setProfile({ id: '', name: '', color: '#FA6C9A', bio: '', icon: null });
+                        }
+                    } catch (e) { setPbUrl(null); }
+                }
+            }, [pbUrl, cleanupOldMessagesGlobally]);
+
+            // 定期的なクリーンアップ
+            useEffect(() => {
+                if (!pb) return;
+                // 6時間ごとにクリーンアップを実行
+                const cleanupInterval = setInterval(() => {
+                    cleanupOldMessagesGlobally(pb);
+                }, 6 * 60 * 60 * 1000);
+
+                return () => clearInterval(cleanupInterval);
+            }, [pb, cleanupOldMessagesGlobally]);
+
+
+            const handleConnect = (url) => { localStorage.setItem('pb_url', url); setPbUrl(url); };
+            const handleSaveProfile = async (newProfile) => {
+                setProfile(newProfile);
+
+                // localStorageにはBlobやプレビューURLオブジェクトを保存できないため、
+                // 文字列（サーバー上のファイル名）以外の場合は保存用データから除外する
+                const profileToSave = { ...newProfile };
+                if (typeof profileToSave.icon !== 'string') {
+                    delete profileToSave.icon;
+                }
+                localStorage.setItem('chat_profile', JSON.stringify(profileToSave));
+
+                document.documentElement.style.setProperty('--theme-color', newProfile.color);
+                setIsEditingProfile(false);
+
+                // ★追加: プロフィール変更時にサーバー上の自分の全データを更新する（分身防止）
+                if (pb && newProfile.id) {
+                    try {
+                        const allRecords = await pb.collection('members').getFullList();
+                        const myRecords = allRecords.filter(r => r.user_id === newProfile.id);
+
+                        // 1. 永続プロフィールレコード (SYSTEM_PROFILE) を確保する
+                        let systemRecord = myRecords.find(r => r.room === 'SYSTEM_PROFILE');
+                        let finalLastMemberId = newProfile.last_member_id;
+
+                        // アイコンの本体を取得
+                        const iconBlob = (newProfile.icon && typeof newProfile.icon === 'object') ? newProfile.icon.blob : newProfile.icon;
+
+                        const performUpdate = async (recordId, isSystem = false) => {
+                            const formData = new FormData();
+                            formData.append("user_name", newProfile.name);
+                            formData.append("user_color", newProfile.color);
+                            if (newProfile.bio) formData.append("user_bio", newProfile.bio);
+                            if (iconBlob instanceof Blob) {
+                                formData.append("user_icon", iconBlob, "icon.jpg");
+                            } else if (typeof newProfile.icon === 'string') {
+                                // 既にサーバーに保存されているアイコン名があれば、それを再利用
+                                formData.append("user_icon", newProfile.icon);
+                            }
+                            const updated = await pb.collection('members').update(recordId, formData);
+                            if (isSystem) finalLastMemberId = updated.id;
+                            return updated;
+                        };
+
+                        if (!systemRecord) {
+                            // 作成
+                            const createData = new FormData();
+                            createData.append("room", "SYSTEM_PROFILE");
+                            createData.append("user_id", newProfile.id);
+                            createData.append("user_name", newProfile.name);
+                            createData.append("user_color", newProfile.color);
+                            if (newProfile.bio) createData.append("user_bio", newProfile.bio);
+                            if (iconBlob instanceof Blob) createData.append("user_icon", iconBlob, "icon.jpg");
+                            else if (typeof newProfile.icon === 'string') createData.append("user_icon", newProfile.icon);
+                            const created = await pb.collection('members').create(createData);
+                            finalLastMemberId = created.id;
+                        } else {
+                            await performUpdate(systemRecord.id, true);
+                        }
+
+                        // 2. 他の部屋のレコードも同期更新
+                        const otherRecords = myRecords.filter(r => r.room !== 'SYSTEM_PROFILE');
+                        const results = await Promise.all(otherRecords.map(r => performUpdate(r.id))).catch(() => []);
+
+                        // 3. 全て完了後に最終的なプロファイルを保存
+                        const finalProfile = {
+                            ...newProfile,
+                            last_member_id: finalLastMemberId
+                        };
+
+                        // アイコン名が返ってきているはずなので、最新のを取得（systemRecord更新後など）
+                        const latestSystem = await pb.collection('members').getOne(finalLastMemberId);
+                        if (latestSystem.user_icon) finalProfile.icon = latestSystem.user_icon;
+
+                        setProfile(finalProfile);
+                        localStorage.setItem('chat_profile', JSON.stringify(finalProfile));
+
+                    } catch (e) {
+                        console.error("Profile sync error:", e);
+                    }
+                }
+            };
+
+            const AppContent = () => {
+                if (!pbUrl) return <SetupScreen onConnect={handleConnect} defaultUrl={pbUrl} />;
+                if (!profile && !isEditingProfile) return <div className="h-dvh-fix bg-bg-main flex items-center justify-center text-theme font-bold tracking-widest animate-pulse">INITIALIZING...</div>;
+                if (isEditingProfile) return <ProfileSetup profile={profile} onSave={handleSaveProfile} onCancel={profile && profile.name ? () => setIsEditingProfile(false) : null} pb={pb} />;
+                if (currentRoom) return <ChatRoom room={currentRoom} pb={pb} profile={profile} onBack={() => setCurrentRoom(null)} onOpenProfile={() => setIsEditingProfile(true)} />;
+                return <Lobby onChangeRoom={setCurrentRoom} onOpenProfile={() => setIsEditingProfile(true)} profile={profile} pb={pb} currentTab={lastLobbyTab} onTabChange={setLastLobbyTab} />;
+            };
+
+            return (
+                <ToastProvider>
+                    <AppContent />
+                </ToastProvider>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+
+</html>
