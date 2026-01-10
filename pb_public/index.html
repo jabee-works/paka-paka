@@ -234,7 +234,10 @@
 
         // --- iOS/Native Notification Helper ---
         const sendNativeNotification = async (title, body) => {
-            // Notifications disabled in simplified version
+            if (!('Notification' in window)) return;
+            if (Notification.permission === 'granted') {
+                new Notification(title, { body, icon: './icon.svg' });
+            }
         };
 
         // --- Utils ---
@@ -431,6 +434,31 @@
                 }
             }, [themeMode]);
 
+            const [notificationEnabled, setNotificationEnabled] = useState(localStorage.getItem('notification_enabled') === 'true');
+
+            const handleNotificationToggle = () => {
+                if (!notificationEnabled) {
+                    if (Notification.permission === 'granted') {
+                        setNotificationEnabled(true);
+                        showToast('通知をオンにしました', 'success');
+                    } else if (Notification.permission !== 'denied') {
+                        Notification.requestPermission().then(permission => {
+                            if (permission === 'granted') {
+                                setNotificationEnabled(true);
+                                showToast('通知をオンにしました', 'success');
+                            } else {
+                                showToast('通知が許可されませんでした', 'error');
+                            }
+                        });
+                    } else {
+                        showToast('ブラウザの設定で通知を許可してください', 'error');
+                    }
+                } else {
+                    setNotificationEnabled(false);
+                    showToast('通知をオフにしました', 'info');
+                }
+            };
+
             const handleSubmit = (e) => {
                 e.preventDefault();
                 localStorage.setItem('theme_mode', themeMode);
@@ -442,6 +470,7 @@
                     color,
                     icon, // Just the emoji string
                 });
+                localStorage.setItem('notification_enabled', notificationEnabled);
                 showToast('プロフィールを更新しました', 'success');
             };
 
@@ -496,6 +525,15 @@
                                     <button type="button" onClick={() => setThemeMode('dark')} className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-2 text-sm font-bold transition-all ${themeMode === 'dark' ? 'bg-bg-panel text-theme shadow-sm' : 'text-text-sub'}`}><LucideIcons.Moon size={16} /> ダーク</button>
                                     <button type="button" onClick={() => setThemeMode('light')} className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-2 text-sm font-bold transition-all ${themeMode === 'light' ? 'bg-bg-panel text-theme shadow-sm' : 'text-text-sub'}`}><LucideIcons.Sun size={16} /> ライト</button>
                                 </div>
+                            </div>
+                            <div>
+                                <label className="text-xs font-bold text-text-sub uppercase ml-1">通知設定</label>
+                                <button type="button" onClick={handleNotificationToggle} className={`w-full py-3 mt-2 rounded-xl flex items-center justify-between px-4 font-bold border ${notificationEnabled ? 'bg-bg-panel border-theme text-theme' : 'bg-bg-input border-border-main text-text-sub'}`}>
+                                    <span className="flex items-center gap-2"><LucideIcons.Bell size={18} /> 通知 {notificationEnabled ? 'ON' : 'OFF'}</span>
+                                    <div className={`w-10 h-6 rounded-full relative transition-colors ${notificationEnabled ? 'bg-theme' : 'bg-gray-500'}`}>
+                                        <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${notificationEnabled ? 'left-5' : 'left-1'}`}></div>
+                                    </div>
+                                </button>
                             </div>
                             <div>
                                 <label className="text-xs font-bold text-text-sub uppercase ml-1">自己紹介</label>
@@ -599,6 +637,7 @@
                 const rtdb = firebase.database();
                 const messagesRef = rtdb.ref(`rooms/${room.id}/messages`);
                 const q = messagesRef.orderByChild('date').limitToLast(50);
+                const isInitialLoad = { current: true };
 
                 const handleMessage = (snapshot) => {
                     const data = snapshot.val();
@@ -606,32 +645,53 @@
                         setMessages(prev => {
                             if (prev.some(m => m.id === snapshot.key)) return prev;
                             const newMsg = { id: snapshot.key, ...data };
-                            if (newMsg.reactions) {
-                                // Convert object reaction { "👍": { "uid": true } } map to generic format if needed, 
-                                // or just store raw and parse in render
+
+                            // Notification Logic
+                            // Only notify if not initial load, not my message, and message is newer than mount time (approx)
+                            // AND Notification is enabled in settings
+                            if (!isInitialLoad.current && newMsg.user_id !== profile.id) {
+                                if (localStorage.getItem('notification_enabled') === 'true') {
+                                    sendNativeNotification(`New message from ${newMsg.user_name}`, newMsg.text);
+                                }
                             }
+
                             return [...prev, newMsg].sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0));
                         });
-                        setTimeout(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, 100);
+                        if (isInitialLoad.current) {
+                            setTimeout(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, 100);
+                        }
                     }
                 };
 
-                // Also listen for child_changed (for reactions)
-                const handleChanged = (snapshot) => {
-                    const data = snapshot.val();
-                    if (data) {
-                        setMessages(prev => prev.map(m => m.id === snapshot.key ? { id: snapshot.key, ...data } : m));
-                    }
+                // Allow notifications after a short delay
+                setTimeout(() => { isInitialLoad.current = false; }, 2000);
+
+                const handleChildAdded = (snapshot) => {
+                    // We use on('value') for initial state but child_added explains the flow better. 
+                    // Actually, current implementation uses on('value') in original code? 
+                    // The original code below uses on('value'). Let's stick to on('child_added') mixed with value?
+                    // No, original code used on('value') but that updates everything.
+                    // Let's just hook into the existing state update logic.
+                    // The existing code uses on('value')? Let's check below.
+                    // Wait, the original code had:
+                    // const handleMessage = (snapshot) => { const data = snapshot.val(); ... }
+                    // messagesRef.orderByChild('date').limitToLast(50).on('child_added', handleMessage);
+                    // Let's verify what event is used.
                 };
 
+                // Switching to child_added for better per-message control
                 q.on('child_added', handleMessage);
-                q.on('child_changed', handleChanged);
+                q.on('child_changed', (snapshot) => {
+                    // Handle updates (reactions)
+                    setMessages(prev => prev.map(m => m.id === snapshot.key ? { ...m, ...snapshot.val() } : m));
+                });
 
                 return () => {
                     q.off('child_added', handleMessage);
-                    q.off('child_changed', handleChanged);
+                    q.off('child_changed');
                 };
-            }, [room.id]);
+            }, [room.id, profile.id]);
+
 
             // Listen for Members
             useEffect(() => {
@@ -725,13 +785,25 @@
                 <div className={`bg-bg-main ${isEmbedded ? 'relative flex flex-col w-full h-full' : 'absolute inset-0 z-10 animate-fade-in h-dvh-fix'}`}>
                     <header className={`glass z-40 transition-all safe-top ${isEmbedded ? 'hidden' : 'fixed top-0 left-0 right-0'}`}>
                         <div className="h-16 flex items-center justify-between px-4">
-                            {!isEmbedded && <button onClick={onBack} className="p-2 -mr-2 text-text-sub hover:text-theme transition-colors"><LucideIcons.ArrowLeft size={24} /></button>}
-                            <div className="w-px h-6 bg-border-main mx-2" />
-                            <div className="flex items-center">
-                                <button onClick={() => setShowMembers(true)} className="p-2 mr-2 text-theme hover:text-white transition-colors"><LucideIcons.Users size={24} /></button>
-                                <button onClick={onOpenProfile} className="relative group transition-transform active:scale-95">
-                                    <div className="w-8 h-8 rounded-full border-2 border-theme p-0.5 flex items-center justify-center overflow-hidden bg-bg-panel">
-                                        <span className="font-bold text-sm text-theme pt-1">{profile && profile.name ? profile.name[0] : '?'}</span>
+                            <div className="flex items-center gap-2">
+                                {!isEmbedded && (
+                                    <button onClick={onBack} className="p-2 -ml-2 rounded-full hover:bg-white/10 text-theme transition-colors">
+                                        <LucideIcons.ArrowLeft size={24} />
+                                    </button>
+                                )}
+                                <h2 className="text-lg font-bold text-text-main tracking-tight flex items-center gap-2">
+                                    <span className="text-2xl">{room.id === 'general' ? '💬' : '🎲'}</span>
+                                    {room.name}
+                                </h2>
+                            </div>
+                            <div className="flex items-center gap-1">
+                                <button onClick={() => setShowMembers(true)} className="p-2 rounded-full hover:bg-white/10 text-theme transition-colors relative">
+                                    <LucideIcons.Users size={24} />
+                                    <span className="absolute top-1 right-1 w-2 h-2 bg-green-500 rounded-full border border-bg-panel"></span>
+                                </button>
+                                <button onClick={onOpenProfile} className="relative group transition-transform active:scale-95 ml-2">
+                                    <div className="w-8 h-8 rounded-full border-2 p-0.5 flex items-center justify-center overflow-hidden bg-bg-panel" style={{ borderColor: profile?.color || 'var(--theme-color)' }}>
+                                        <span className="font-bold text-sm pt-0.5" style={{ color: profile?.color || 'var(--theme-color)' }}>{profile?.icon || (profile?.name ? profile.name[0] : '?')}</span>
                                     </div>
                                 </button>
                             </div>
