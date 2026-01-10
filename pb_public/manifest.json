@@ -1,10 +1,11 @@
 {
     "name": "paka-paka",
     "short_name": "paka-paka",
-    "start_url": "/index.html",
+    "start_url": "./index.html",
+    "scope": "./",
     "display": "standalone",
-    "background_color": "#f3f4f6",
-    "theme_color": "#4f46e5",
+    "background_color": "#0f172a",
+    "theme_color": "#FA6C9A",
     "icons": [
         {
             "src": "icon.svg",

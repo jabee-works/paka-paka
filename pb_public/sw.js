@@ -1,13 +1,13 @@
 // ファイル名: sw.js
 
-self.addEventListener('push', function(event) {
+self.addEventListener('push', function (event) {
     // サーバーから通知データが来たときに動く
     let data = { title: '新着メッセージ', body: 'メッセージが届きました' };
-    
+
     if (event.data) {
         try {
             data = event.data.json();
-        } catch(e) {
+        } catch (e) {
             data.body = event.data.text();
         }
     }
@@ -27,12 +27,12 @@ self.addEventListener('push', function(event) {
     );
 });
 
-self.addEventListener('notificationclick', function(event) {
+self.addEventListener('notificationclick', function (event) {
     // 通知をタップしたときの動作
     event.notification.close();
-    
+
     event.waitUntil(
-        clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(clientList) {
+        clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (clientList) {
             // すでにアプリが開いていればフォーカス、なければ開く
             if (clientList.length > 0) {
                 let client = clientList[0];
@@ -41,7 +41,7 @@ self.addEventListener('notificationclick', function(event) {
                 }
                 return client.focus();
             }
-            return clients.openWindow('/');
+            return clients.openWindow('./index.html');
         })
     );
 });
