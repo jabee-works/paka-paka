@@ -9,7 +9,7 @@
         "rewrites": [
             {
                 "source": "**",
-                "destination": "/index_firebase.html"
+                "destination": "/index.html"
             }
         ]
     }
