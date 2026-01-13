@@ -929,31 +929,31 @@
 
             useEffect(() => {
                 const rtdb = firebase.database();
-                const roomsRef = rtdb.ref('rooms');
+                const listeners = [];
 
-                const handleValue = (snapshot) => {
-                    const data = snapshot.val();
-                    if (!data) { setRoomStats({}); return; }
+                ROOMS.forEach(room => {
+                    const membersRef = rtdb.ref(`rooms/${room.id}/members`);
 
-                    const newStats = {};
-                    Object.keys(data).forEach(roomId => {
-                        const roomData = data[roomId];
-                        const members = roomData.members ? Object.values(roomData.members) : [];
+                    const handleValue = (snapshot) => {
+                        const membersMap = snapshot.val() || {};
+                        const membersList = Object.values(membersMap);
 
-                        // Active check (offline handling is done by onDisconnect, but we can also check last_seen if needed)
-                        // For now just count the members present in the DB, assuming onDisconnect works reliably
-                        const activeMembers = members;
+                        setRoomStats(prev => ({
+                            ...prev,
+                            [room.id]: {
+                                count: membersList.length,
+                                users: membersList.slice(0, 5)
+                            }
+                        }));
+                    };
 
-                        newStats[roomId] = {
-                            count: activeMembers.length,
-                            users: activeMembers.slice(0, 5)
-                        };
-                    });
-                    setRoomStats(newStats);
-                }
+                    membersRef.on('value', handleValue);
+                    listeners.push({ ref: membersRef, callback: handleValue });
+                });
 
-                roomsRef.on('value', handleValue);
-                return () => roomsRef.off('value', handleValue);
+                return () => {
+                    listeners.forEach(l => l.ref.off('value', l.callback));
+                };
             }, []);
 
             const handleEnterRoom = (room) => {
