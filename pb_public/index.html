@@ -612,6 +612,7 @@
                 const rtdb = firebase.database();
                 const memberRef = rtdb.ref(`rooms/${room.id}/members/${profile.id}`);
                 const connectedRef = rtdb.ref(".info/connected");
+                let isConnected = false;
 
                 const presenceData = {
                     user_id: profile.id,
@@ -622,21 +623,36 @@
                     last_seen: firebase.database.ServerValue.TIMESTAMP
                 };
 
+                const setPresence = () => {
+                    // 切断時に自分が消えるように設定してから、自身の存在情報をセット
+                    memberRef.onDisconnect().remove()
+                        .then(() => memberRef.set(presenceData))
+                        .catch(err => console.error("Presence set error:", err));
+                };
+
                 const handleConnected = (snap) => {
-                    if (snap.val() === true) {
-                        // 接続が確立（または復帰）したタイミングで
-                        // 1. 切断時に自分が消えるように設定
-                        // 2. 自分の情報をセット（これで再接続時もリストに復活）
-                        memberRef.onDisconnect().remove()
-                            .then(() => memberRef.set(presenceData))
-                            .catch(err => console.error("Presence set error:", err));
+                    const val = snap.val();
+                    isConnected = (val === true);
+                    if (isConnected) {
+                        setPresence();
+                    }
+                };
+
+                const handleVisibilityChange = () => {
+                    // アプリがバックグラウンドから復帰した際に、接続済みであれば再度存在情報をセット
+                    if (document.visibilityState === 'visible' && isConnected) {
+                        console.log("App resumed, refreshing presence.");
+                        setPresence();
                     }
                 };
 
                 connectedRef.on('value', handleConnected);
+                document.addEventListener("visibilitychange", handleVisibilityChange);
 
                 return () => {
                     connectedRef.off('value', handleConnected);
+                    document.removeEventListener("visibilitychange", handleVisibilityChange);
+                    memberRef.onDisconnect().cancel(); // 念のためキャンセル
                     memberRef.remove();
                 };
             }, [room.id, profile]);
