@@ -222,7 +222,7 @@
         const ICON_PRESETS = ["🐶", "🐱", "🐭", "🐹", "🐰", "🦊", "🐻", "🐼", "🐨", "🐯"];
 
         const HEARTBEAT_INTERVAL_MS = 20 * 1000;
-        const GHOST_TIMEOUT_MS = 60 * 1000;
+        const GHOST_TIMEOUT_MS = 3 * 60 * 1000; // 3分間は「一時的な離脱」として扱う
 
         const CHINCHIRO_BOT_PROFILE = {
             id: "bot_chinchiro",
@@ -646,9 +646,9 @@
                 });
 
                 const setPresence = () => {
-                    // 切断時に自分が消えるように設定してから、自身の存在情報をセット
-                    memberRef.onDisconnect().remove()
-                        .then(() => memberRef.set(getPresenceData()))
+                    // onDisconnect().remove() は iOS PWAでバックグラウンドに回った瞬間に消えてしまうため削除。
+                    // 代わりに last_seen タイムスタンプによる有効期限判定を行う。
+                    memberRef.set(getPresenceData())
                         .catch(err => console.error("Presence set error:", err));
                 };
 
@@ -769,7 +769,15 @@
                         return;
                     }
                     const list = Object.values(data);
-                    setMembers(list);
+
+                    // 一定期間更新がないユーザーは表示上のリストから除外する（有効期限判定）
+                    const now = Date.now();
+                    const activeList = list.filter(m => {
+                        const lastSeen = m.last_seen || 0;
+                        return (now - lastSeen) < GHOST_TIMEOUT_MS;
+                    });
+
+                    setMembers(activeList);
                 };
 
                 const handleMemberJoined = (snapshot) => {
@@ -1025,11 +1033,18 @@
                         const membersMap = snapshot.val() || {};
                         const membersList = Object.values(membersMap);
 
+                        // ロビー画面の人数カウントでも有効期限をチェックする
+                        const now = Date.now();
+                        const activeList = membersList.filter(m => {
+                            const lastSeen = m.last_seen || 0;
+                            return (now - lastSeen) < GHOST_TIMEOUT_MS;
+                        });
+
                         setRoomStats(prev => ({
                             ...prev,
                             [room.id]: {
-                                count: membersList.length,
-                                users: membersList.slice(0, 5)
+                                count: activeList.length,
+                                users: activeList.slice(0, 5)
                             }
                         }));
                     };
