@@ -671,15 +671,14 @@
                 };
 
                 const handleVisibilityChange = () => {
-                    // アプリがバックグラウンドから復帰した際に、接続済みであれば再度存在情報をセット
                     if (document.visibilityState === 'visible') {
-                        if (isConnected) {
-                            console.log("App resumed, refreshing presence.");
-                            setPresence();
-                        } else {
-                            // 接続が切れていればFirebaseは自動再接続を試みるが、明示的に存在チェックを促す
-                            console.log("App resumed, waiting for connection...");
-                        }
+                        console.log("App resumed, refreshing presence.");
+                        // 復帰時に即座に再接続を促す
+                        firebase.database().goOnline();
+                        setPresence();
+                    } else {
+                        // バックグラウンドに入った時、サーバーとの接続を維持しようとする（iOSでは限界があるが）
+                        console.log("App moved to background.");
                     }
                 };
 
