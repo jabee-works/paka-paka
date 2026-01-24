@@ -753,21 +753,33 @@
                 };
 
                 const handleMemberJoined = (snapshot) => {
-                    if (isInitialMembersLoad.current) return;
                     const newMember = snapshot.val();
-                    if (newMember.user_id !== profile.id && localStorage.getItem('notification_enabled') === 'true') {
+                    if (!newMember) return;
+
+                    console.log("Member checked:", newMember.user_name, "isInitial:", isInitialMembersLoad.current);
+
+                    if (isInitialMembersLoad.current) return;
+
+                    const isMe = newMember.user_id === profile.id;
+                    const isNotificationEnabled = localStorage.getItem('notification_enabled') === 'true';
+
+                    if (!isMe && isNotificationEnabled) {
+                        console.log("Sending entry notification for:", newMember.user_name);
                         sendNativeNotification(`${newMember.user_name}さんが入室しました`, `${room.name}ルーム`);
+                    } else {
+                        console.log("Notification skipped:", { isMe, isNotificationEnabled });
                     }
                 };
 
                 membersRef.on('value', handleMembers);
                 membersRef.on('child_added', handleMemberJoined);
 
-                // 初回読み込み完了を判定
+                // 初回読み込み完了のフラグをより早く切り替える（既存メンバーのchild_addedはほぼ瞬時に終わるため）
                 membersRef.once('value').then(() => {
                     setTimeout(() => {
                         isInitialMembersLoad.current = false;
-                    }, 1000);
+                        console.log("Initial members load completed. Entry notifications enabled.");
+                    }, 500); // 1秒から0.5秒に短縮
                 });
 
                 return () => {
