@@ -613,21 +613,31 @@
                 const memberRef = rtdb.ref(`rooms/${room.id}/members/${profile.id}`);
                 const connectedRef = rtdb.ref(".info/connected");
                 let isConnected = false;
+                let heartbeatInterval = null;
 
-                const presenceData = {
+                const getPresenceData = () => ({
                     user_id: profile.id,
                     user_name: profile.name,
                     user_color: profile.color,
                     user_icon: profile.icon,
                     user_bio: profile.bio || "",
                     last_seen: firebase.database.ServerValue.TIMESTAMP
-                };
+                });
 
                 const setPresence = () => {
                     // 切断時に自分が消えるように設定してから、自身の存在情報をセット
                     memberRef.onDisconnect().remove()
-                        .then(() => memberRef.set(presenceData))
+                        .then(() => memberRef.set(getPresenceData()))
                         .catch(err => console.error("Presence set error:", err));
+                };
+
+                const startHeartbeat = () => {
+                    if (heartbeatInterval) clearInterval(heartbeatInterval);
+                    heartbeatInterval = setInterval(() => {
+                        if (isConnected) {
+                            memberRef.update({ last_seen: firebase.database.ServerValue.TIMESTAMP });
+                        }
+                    }, HEARTBEAT_INTERVAL_MS);
                 };
 
                 const handleConnected = (snap) => {
@@ -635,14 +645,20 @@
                     isConnected = (val === true);
                     if (isConnected) {
                         setPresence();
+                        startHeartbeat();
                     }
                 };
 
                 const handleVisibilityChange = () => {
                     // アプリがバックグラウンドから復帰した際に、接続済みであれば再度存在情報をセット
-                    if (document.visibilityState === 'visible' && isConnected) {
-                        console.log("App resumed, refreshing presence.");
-                        setPresence();
+                    if (document.visibilityState === 'visible') {
+                        if (isConnected) {
+                            console.log("App resumed, refreshing presence.");
+                            setPresence();
+                        } else {
+                            // 接続が切れていればFirebaseは自動再接続を試みるが、明示的に存在チェックを促す
+                            console.log("App resumed, waiting for connection...");
+                        }
                     }
                 };
 
@@ -652,7 +668,8 @@
                 return () => {
                     connectedRef.off('value', handleConnected);
                     document.removeEventListener("visibilitychange", handleVisibilityChange);
-                    memberRef.onDisconnect().cancel(); // 念のためキャンセル
+                    if (heartbeatInterval) clearInterval(heartbeatInterval);
+                    memberRef.onDisconnect().cancel();
                     memberRef.remove();
                 };
             }, [room.id, profile]);
@@ -723,6 +740,7 @@
             useEffect(() => {
                 const rtdb = firebase.database();
                 const membersRef = rtdb.ref(`rooms/${room.id}/members`);
+                const isInitialMembersLoad = { current: true };
 
                 const handleMembers = (snapshot) => {
                     const data = snapshot.val();
@@ -734,9 +752,29 @@
                     setMembers(list);
                 };
 
+                const handleMemberJoined = (snapshot) => {
+                    if (isInitialMembersLoad.current) return;
+                    const newMember = snapshot.val();
+                    if (newMember.user_id !== profile.id && localStorage.getItem('notification_enabled') === 'true') {
+                        sendNativeNotification(`${newMember.user_name}さんが入室しました`, `${room.name}ルーム`);
+                    }
+                };
+
                 membersRef.on('value', handleMembers);
-                return () => membersRef.off('value', handleMembers);
-            }, [room.id]);
+                membersRef.on('child_added', handleMemberJoined);
+
+                // 初回読み込み完了を判定
+                membersRef.once('value').then(() => {
+                    setTimeout(() => {
+                        isInitialMembersLoad.current = false;
+                    }, 1000);
+                });
+
+                return () => {
+                    membersRef.off('value', handleMembers);
+                    membersRef.off('child_added', handleMemberJoined);
+                };
+            }, [room.id, profile.id]);
 
 
             const handleSend = async () => {
