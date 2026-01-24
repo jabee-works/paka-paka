@@ -236,6 +236,27 @@
         const sendNativeNotification = async (title, body) => {
             if (!('Notification' in window)) return;
             if (Notification.permission === 'granted') {
+                // iPhone/PWAでより確実に動作させるため、Service Worker経由の通知を優先する
+                if ('serviceWorker' in navigator) {
+                    try {
+                        const registration = await navigator.serviceWorker.getRegistration();
+                        if (registration && registration.showNotification) {
+                            registration.showNotification(title, {
+                                body: body,
+                                icon: './icon.svg',
+                                badge: './icon.svg',
+                                vibrate: [100, 50, 100],
+                                data: {
+                                    url: window.location.href
+                                }
+                            });
+                            return;
+                        }
+                    } catch (e) {
+                        console.error("ServiceWorker notification failed:", e);
+                    }
+                }
+                // フォールバック（標準の通知）
                 new Notification(title, { body, icon: './icon.svg' });
             }
         };
@@ -774,12 +795,13 @@
                 membersRef.on('value', handleMembers);
                 membersRef.on('child_added', handleMemberJoined);
 
-                // 初回読み込み完了のフラグをより早く切り替える（既存メンバーのchild_addedはほぼ瞬時に終わるため）
+                // 初回読み込み完了のフラグを切り替える
                 membersRef.once('value').then(() => {
+                    // 既存メンバーの処理が確実に終わるまで少し待機
                     setTimeout(() => {
                         isInitialMembersLoad.current = false;
                         console.log("Initial members load completed. Entry notifications enabled.");
-                    }, 500); // 1秒から0.5秒に短縮
+                    }, 800);
                 });
 
                 return () => {
