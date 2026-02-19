@@ -760,7 +760,6 @@
             useEffect(() => {
                 const rtdb = firebase.database();
                 const membersRef = rtdb.ref(`rooms/${room.id}/members`);
-                const isInitialMembersLoad = { current: true };
 
                 const handleMembers = (snapshot) => {
                     const data = snapshot.val();
@@ -780,40 +779,10 @@
                     setMembers(activeList);
                 };
 
-                const handleMemberJoined = (snapshot) => {
-                    const newMember = snapshot.val();
-                    if (!newMember) return;
-
-                    console.log("Member checked:", newMember.user_name, "isInitial:", isInitialMembersLoad.current);
-
-                    if (isInitialMembersLoad.current) return;
-
-                    const isMe = newMember.user_id === profile.id;
-                    const isNotificationEnabled = localStorage.getItem('notification_enabled') === 'true';
-
-                    if (!isMe && isNotificationEnabled) {
-                        console.log("Sending entry notification for:", newMember.user_name);
-                        sendNativeNotification(`${newMember.user_name}さんが入室しました`, `${room.name}ルーム`);
-                    } else {
-                        console.log("Notification skipped:", { isMe, isNotificationEnabled });
-                    }
-                };
-
                 membersRef.on('value', handleMembers);
-                membersRef.on('child_added', handleMemberJoined);
-
-                // 初回読み込み完了のフラグを切り替える
-                membersRef.once('value').then(() => {
-                    // 既存メンバーの処理が確実に終わるまで少し待機
-                    setTimeout(() => {
-                        isInitialMembersLoad.current = false;
-                        console.log("Initial members load completed. Entry notifications enabled.");
-                    }, 800);
-                });
 
                 return () => {
                     membersRef.off('value', handleMembers);
-                    membersRef.off('child_added', handleMemberJoined);
                 };
             }, [room.id, profile.id]);
 
@@ -1193,6 +1162,53 @@
                 });
                 return () => unsubscribe();
             }, []);
+
+            // --- グローバル入室通知リスナー ---
+            // 通知ONの場合、どの画面にいても全ルームへの入室を検知して通知する
+            useEffect(() => {
+                if (!isAuthReady || !profile) return;
+
+                const rtdb = firebase.database();
+                const allRooms = [{ id: 'general', name: 'オープン掲示板' }, ...ROOMS];
+                const listeners = [];
+                const initialLoadFlags = {};
+
+                allRooms.forEach(room => {
+                    const membersRef = rtdb.ref(`rooms/${room.id}/members`);
+                    initialLoadFlags[room.id] = true;
+
+                    const handleChildAdded = (snapshot) => {
+                        const newMember = snapshot.val();
+                        if (!newMember) return;
+
+                        // 初回ロード中は通知しない
+                        if (initialLoadFlags[room.id]) return;
+
+                        const isMe = newMember.user_id === profile.id;
+                        const isNotificationEnabled = localStorage.getItem('notification_enabled') === 'true';
+
+                        if (!isMe && isNotificationEnabled) {
+                            console.log("[Global] Sending entry notification for:", newMember.user_name, "in", room.name);
+                            sendNativeNotification(`${newMember.user_name}さんが入室しました`, `${room.name}ルーム`);
+                        }
+                    };
+
+                    membersRef.on('child_added', handleChildAdded);
+                    listeners.push({ ref: membersRef, event: 'child_added', callback: handleChildAdded });
+
+                    // 初回読み込み完了後にフラグを解除
+                    membersRef.once('value').then(() => {
+                        setTimeout(() => {
+                            initialLoadFlags[room.id] = false;
+                            console.log(`[Global] Initial members load completed for ${room.name}. Entry notifications enabled.`);
+                        }, 800);
+                    });
+                });
+
+                return () => {
+                    listeners.forEach(l => l.ref.off(l.event, l.callback));
+                };
+            }, [isAuthReady, profile]);
 
             const handleSaveProfile = async (newProfile) => {
                 setProfile(newProfile);
