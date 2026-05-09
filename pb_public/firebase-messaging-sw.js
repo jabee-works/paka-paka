@@ -17,6 +17,15 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
+// 古いService Worker (sw.js) から即座に切り替えるための処理
+self.addEventListener('install', (event) => {
+    self.skipWaiting();
+});
+
+self.addEventListener('activate', (event) => {
+    event.waitUntil(self.clients.claim());
+});
+
 // バックグラウンドメッセージ受信時の処理
 messaging.onBackgroundMessage((payload) => {
     console.log('[SW] Background message received:', payload);
