@@ -19,28 +19,48 @@ const ROOM_NAMES = {
 };
 
 // =============================================
-// ヘルパー: 有効なFCMトークンを取得して送信
+// ヘルパー: ルーム内の有効なFCMトークンを取得して送信
 // =============================================
-async function sendToAllTokensExcept(excludeUserId, title, body, data = {}) {
-    // 全FCMトークンを取得
-    const tokensSnap = await db.ref("fcm_tokens").once("value");
-    const tokensData = tokensSnap.val();
-    if (!tokensData) return;
+async function sendToRoomMembersExcept(roomId, excludeUserId, title, body, data = {}) {
+    // 1. 指定されたルームの現在のメンバーを取得
+    const membersSnap = await db.ref(`rooms/${roomId}/members`).once("value");
+    const membersData = membersSnap.val();
+    if (!membersData) return; // 誰もいない
 
+    // 1時間を超えて放置されているメンバー（ゴースト）は除外する
+    const GHOST_TIMEOUT_MS = 60 * 60 * 1000;
+    const now = Date.now();
+    const activeUserIds = [];
+
+    Object.entries(membersData).forEach(([userId, userData]) => {
+        if (userId === excludeUserId) return; // 送信者自身は除外
+        
+        const lastSeen = userData.last_seen || 0;
+        if ((now - lastSeen) < GHOST_TIMEOUT_MS) {
+            activeUserIds.push(userId);
+        }
+    });
+
+    if (activeUserIds.length === 0) return;
+
+    // 2. アクティブなメンバーのFCMトークンを取得
     const tokensToSend = [];
     const tokenUserMap = {}; // token -> userId（無効トークン削除用）
 
-    Object.entries(tokensData).forEach(([userId, userData]) => {
-        if (userId === excludeUserId) return; // 送信者自身は除外
-        if (!userData.token) return;
-
-        tokensToSend.push(userData.token);
-        tokenUserMap[userData.token] = userId;
+    const tokenPromises = activeUserIds.map(async (userId) => {
+        const tokenSnap = await db.ref(`fcm_tokens/${userId}`).once("value");
+        const tokenData = tokenSnap.val();
+        if (tokenData && tokenData.token) {
+            tokensToSend.push(tokenData.token);
+            tokenUserMap[tokenData.token] = userId;
+        }
     });
+
+    await Promise.all(tokenPromises);
 
     if (tokensToSend.length === 0) return;
 
-    // multicastで一括送信
+    // 3. multicastで一括送信
     const message = {
         notification: { title, body },
         data: { ...data, title, body },
@@ -50,7 +70,7 @@ async function sendToAllTokensExcept(excludeUserId, title, body, data = {}) {
     try {
         const response = await messaging.sendEachForMulticast(message);
         console.log(
-            `Sent: ${response.successCount} success, ${response.failureCount} failure`
+            `[${roomId}] Sent: ${response.successCount} success, ${response.failureCount} failure`
         );
 
         // 無効なトークンをクリーンアップ
@@ -73,9 +93,7 @@ async function sendToAllTokensExcept(excludeUserId, title, body, data = {}) {
             const deletePromises = invalidTokens.map((token) => {
                 const userId = tokenUserMap[token];
                 if (userId) {
-                    console.log(
-                        `Removing invalid token for user: ${userId}`
-                    );
+                    console.log(`Removing invalid token for user: ${userId}`);
                     return db.ref(`fcm_tokens/${userId}`).remove();
                 }
                 return Promise.resolve();
@@ -107,7 +125,7 @@ exports.onNewMessage = functions.database
         const title = `${senderName}（${roomName}）`;
         const body = messageText;
 
-        return sendToAllTokensExcept(senderId, title, body, {
+        return sendToRoomMembersExcept(roomId, senderId, title, body, {
             type: "message",
             roomId: roomId,
             senderId: senderId,
@@ -131,7 +149,7 @@ exports.onMemberJoin = functions.database
         const title = `${memberName}さんが入室`;
         const body = `${roomName}ルーム`;
 
-        return sendToAllTokensExcept(memberId, title, body, {
+        return sendToRoomMembersExcept(roomId, memberId, title, body, {
             type: "join",
             roomId: roomId,
             memberId: memberId,
