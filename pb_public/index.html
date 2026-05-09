@@ -88,6 +88,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-messaging-compat.js"></script>
 
     <style>
         :root {
@@ -177,7 +178,7 @@
 
     <script>
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('./sw.js')
+            navigator.serviceWorker.register('./firebase-messaging-sw.js')
                 .then(function (registration) {
                     console.log('ServiceWorker registration successful with scope: ', registration.scope);
                 })
@@ -224,6 +225,84 @@
         const HEARTBEAT_INTERVAL_MS = 20 * 1000;
         const GHOST_TIMEOUT_MS = 60 * 60 * 1000; // 1時間は「一時的な離脱」として扱う
 
+        // ==========================================
+        // 【設定】FCM VAPID Key
+        // ==========================================
+        // Firebaseコンソール → プロジェクト設定 → Cloud Messaging → Web Push certificates
+        // から取得した公開鍵をここに貼り付けてください
+        const FCM_VAPID_KEY = 'BPdauuNJPfNLVhwP711Vt1FOPyLYGMAKh7L-CGzdDhfks778L6yNtd3VP8XzghB30mnsU0LD7QMpiX3oQ8W1xwM';
+
+        // --- FCM Token Management ---
+        let fcmMessaging = null;
+        try {
+            if (isFirebaseInitialized) {
+                fcmMessaging = firebase.messaging();
+            }
+        } catch (e) {
+            console.warn('FCM Messaging init skipped:', e);
+        }
+
+        /**
+         * FCMトークンを取得してRTDBに保存する
+         * @param {string} userId - ユーザーID
+         * @returns {Promise<string|null>} FCMトークン
+         */
+        const requestFcmToken = async (userId) => {
+            if (!fcmMessaging) {
+                console.warn('FCM Messaging not initialized');
+                return null;
+            }
+
+            try {
+                // 通知権限をリクエスト
+                const permission = await Notification.requestPermission();
+                if (permission !== 'granted') {
+                    console.log('Notification permission denied');
+                    return null;
+                }
+
+                // Service Worker registrationを取得
+                const swRegistration = await navigator.serviceWorker.getRegistration();
+                if (!swRegistration) {
+                    console.warn('No Service Worker registration found');
+                    return null;
+                }
+
+                // FCMトークンを取得
+                const token = await fcmMessaging.getToken({
+                    vapidKey: FCM_VAPID_KEY,
+                    serviceWorkerRegistration: swRegistration
+                });
+
+                if (token) {
+                    console.log('FCM Token obtained:', token.substring(0, 20) + '...');
+                    // RTDBにトークンを保存
+                    await firebase.database().ref(`fcm_tokens/${userId}`).set({
+                        token: token,
+                        updated_at: firebase.database.ServerValue.TIMESTAMP
+                    });
+                    return token;
+                }
+                return null;
+            } catch (error) {
+                console.error('FCM token error:', error);
+                return null;
+            }
+        };
+
+        /**
+         * FCMトークンをRTDBから削除する
+         * @param {string} userId - ユーザーID
+         */
+        const removeFcmToken = async (userId) => {
+            try {
+                await firebase.database().ref(`fcm_tokens/${userId}`).remove();
+                console.log('FCM token removed for user:', userId);
+            } catch (error) {
+                console.error('FCM token removal error:', error);
+            }
+        };
+
         const CHINCHIRO_BOT_PROFILE = {
             id: "bot_chinchiro",
             name: "チンチロBOT 🎲",
@@ -232,34 +311,24 @@
             bio: "サイコロを振ります！「チンチロ」と入力してください。",
         };
 
-        // --- iOS/Native Notification Helper ---
-        const sendNativeNotification = async (title, body) => {
-            if (!('Notification' in window)) return;
-            if (Notification.permission === 'granted') {
-                // iPhone/PWAでより確実に動作させるため、Service Worker経由の通知を優先する
-                if ('serviceWorker' in navigator) {
-                    try {
-                        const registration = await navigator.serviceWorker.getRegistration();
-                        if (registration && registration.showNotification) {
-                            registration.showNotification(title, {
-                                body: body,
-                                icon: './icon.svg',
-                                badge: './icon.svg',
-                                vibrate: [100, 50, 100],
-                                data: {
-                                    url: window.location.href
-                                }
-                            });
-                            return;
-                        }
-                    } catch (e) {
-                        console.error("ServiceWorker notification failed:", e);
-                    }
+        // --- フォアグラウンド通知ハンドラー ---
+        // FCMからのフォアグラウンドメッセージはアプリ内トーストで表示する
+        // （バックグラウンドはfirebase-messaging-sw.jsが処理する）
+        let _showToastGlobal = null; // App内で設定される
+
+        if (fcmMessaging) {
+            fcmMessaging.onMessage((payload) => {
+                console.log('[FCM] Foreground message:', payload);
+                const title = payload.notification?.title || payload.data?.title || '新着';
+                const body = payload.notification?.body || payload.data?.body || '';
+                const displayText = `${title}: ${body}`;
+
+                // アプリ内トーストで表示（既に画面を見ているので通知バナーは出さない）
+                if (_showToastGlobal) {
+                    _showToastGlobal(displayText, 'info');
                 }
-                // フォールバック（標準の通知）
-                new Notification(title, { body, icon: './icon.svg' });
-            }
-        };
+            });
+        }
 
         // --- Utils ---
         // 画像URL取得ロジック削除（絵文字のみ使用するため）
@@ -457,24 +526,34 @@
 
             const [notificationEnabled, setNotificationEnabled] = useState(localStorage.getItem('notification_enabled') === 'true');
 
-            const handleNotificationToggle = () => {
+            const handleNotificationToggle = async () => {
                 if (!notificationEnabled) {
-                    if (Notification.permission === 'granted') {
-                        setNotificationEnabled(true);
-                        showToast('通知をオンにしました', 'success');
-                    } else if (Notification.permission !== 'denied') {
-                        Notification.requestPermission().then(permission => {
-                            if (permission === 'granted') {
-                                setNotificationEnabled(true);
-                                showToast('通知をオンにしました', 'success');
-                            } else {
-                                showToast('通知が許可されませんでした', 'error');
-                            }
-                        });
-                    } else {
+                    // FCMトークンを取得＆保存
+                    const userId = (profile && profile.id) || null;
+                    if (!userId) {
+                        showToast('プロフィールを先に設定してください', 'error');
+                        return;
+                    }
+
+                    if (Notification.permission === 'denied') {
                         showToast('ブラウザの設定で通知を許可してください', 'error');
+                        return;
+                    }
+
+                    const token = await requestFcmToken(userId);
+                    if (token) {
+                        setNotificationEnabled(true);
+                        showToast('通知をオンにしました（プッシュ通知対応）', 'success');
+                    } else {
+                        showToast('通知の設定に失敗しました', 'error');
+                        return;
                     }
                 } else {
+                    // FCMトークンを削除
+                    const userId = (profile && profile.id) || null;
+                    if (userId) {
+                        await removeFcmToken(userId);
+                    }
                     setNotificationEnabled(false);
                     showToast('通知をオフにしました', 'info');
                 }
@@ -709,14 +788,8 @@
                             if (prev.some(m => m.id === snapshot.key)) return prev;
                             const newMsg = { id: snapshot.key, ...data };
 
-                            // Notification Logic
-                            // Only notify if not initial load, not my message, and message is newer than mount time (approx)
-                            // AND Notification is enabled in settings
-                            if (!isInitialLoad.current && newMsg.user_id !== profile.id) {
-                                if (localStorage.getItem('notification_enabled') === 'true') {
-                                    sendNativeNotification(`New message from ${newMsg.user_name}`, newMsg.text);
-                                }
-                            }
+                            // フォアグラウンド通知はFCM onMessageで処理するため
+                            // クライアント側の手動通知は不要（Cloud Functionsがプッシュ通知を送信）
 
                             return [...prev, newMsg].sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0));
                         });
@@ -1163,51 +1236,25 @@
                 return () => unsubscribe();
             }, []);
 
-            // --- グローバル入室通知リスナー ---
-            // 通知ONの場合、どの画面にいても全ルームへの入室を検知して通知する
+            // --- FCMトークン自動更新 & フォアグラウンドトースト設定 ---
+            // 通知ONの場合、起動時にFCMトークンを自動更新する
+            // 入室通知・メッセージ通知はCloud Functionsが送信するため、クライアント側リスナーは不要
             useEffect(() => {
                 if (!isAuthReady || !profile) return;
 
-                const rtdb = firebase.database();
-                const allRooms = [{ id: 'general', name: 'オープン掲示板' }, ...ROOMS];
-                const listeners = [];
-                const initialLoadFlags = {};
+                // フォアグラウンドメッセージ用のトースト関数を設定
+                // （_showToastGlobalはグローバル変数で、FCM onMessageから呼ばれる）
+                // ここでは直接設定できないので、ToastContextの外で管理
 
-                allRooms.forEach(room => {
-                    const membersRef = rtdb.ref(`rooms/${room.id}/members`);
-                    initialLoadFlags[room.id] = true;
-
-                    const handleChildAdded = (snapshot) => {
-                        const newMember = snapshot.val();
-                        if (!newMember) return;
-
-                        // 初回ロード中は通知しない
-                        if (initialLoadFlags[room.id]) return;
-
-                        const isMe = newMember.user_id === profile.id;
-                        const isNotificationEnabled = localStorage.getItem('notification_enabled') === 'true';
-
-                        if (!isMe && isNotificationEnabled) {
-                            console.log("[Global] Sending entry notification for:", newMember.user_name, "in", room.name);
-                            sendNativeNotification(`${newMember.user_name}さんが入室しました`, `${room.name}ルーム`);
+                // 通知ONならトークンを自動更新
+                const isNotificationEnabled = localStorage.getItem('notification_enabled') === 'true';
+                if (isNotificationEnabled && profile.id) {
+                    requestFcmToken(profile.id).then(token => {
+                        if (token) {
+                            console.log('[FCM] Token auto-refreshed on startup');
                         }
-                    };
-
-                    membersRef.on('child_added', handleChildAdded);
-                    listeners.push({ ref: membersRef, event: 'child_added', callback: handleChildAdded });
-
-                    // 初回読み込み完了後にフラグを解除
-                    membersRef.once('value').then(() => {
-                        setTimeout(() => {
-                            initialLoadFlags[room.id] = false;
-                            console.log(`[Global] Initial members load completed for ${room.name}. Entry notifications enabled.`);
-                        }, 800);
                     });
-                });
-
-                return () => {
-                    listeners.forEach(l => l.ref.off(l.event, l.callback));
-                };
+                }
             }, [isAuthReady, profile]);
 
             const handleSaveProfile = async (newProfile) => {
@@ -1233,6 +1280,16 @@
                 }
             };
 
+            // FCMフォアグラウンドメッセージ用にToastを接続するコンポーネント
+            const FcmToastConnector = () => {
+                const showToast = useToast();
+                useEffect(() => {
+                    _showToastGlobal = showToast;
+                    return () => { _showToastGlobal = null; };
+                }, [showToast]);
+                return null;
+            };
+
             const AppContent = () => {
                 if (!isAuthReady) return <div className="h-dvh-fix bg-bg-main flex items-center justify-center text-theme font-bold tracking-widest animate-pulse">CONNECTING...</div>;
 
@@ -1254,6 +1311,7 @@
 
             return (
                 <ToastProvider>
+                    <FcmToastConnector />
                     <AppContent />
                 </ToastProvider>
             );

@@ -12,3 +12,6 @@ pb_public_bk/
 
 # Logs
 *.log
+
+# Node
+functions/node_modules/
