@@ -21,9 +21,15 @@ const messaging = firebase.messaging();
 messaging.onBackgroundMessage((payload) => {
     console.log('[SW] Background message received:', payload);
 
-    const notificationTitle = payload.notification?.title || payload.data?.title || '新着メッセージ';
+    // FCM SDKは、payload.notificationが存在する場合、自動的にOS通知を表示します。
+    // ここで再度 showNotification を呼ぶと2回通知が出てしまうため、早期リターンします。
+    if (payload.notification) {
+        return;
+    }
+
+    const notificationTitle = payload.data?.title || '新着メッセージ';
     const notificationOptions = {
-        body: payload.notification?.body || payload.data?.body || 'メッセージが届きました',
+        body: payload.data?.body || 'メッセージが届きました',
         icon: './icon.svg',
         badge: './icon.svg',
         vibrate: [100, 50, 100],
