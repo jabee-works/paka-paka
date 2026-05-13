@@ -149,9 +149,75 @@ exports.onMemberJoin = functions.database
         const title = `${memberName}さんが入室`;
         const body = `${roomName}ルーム`;
 
-        return sendToRoomMembersExcept(roomId, memberId, title, body, {
+        // 1. 同室のメンバーへ通知
+        await sendToRoomMembersExcept(roomId, memberId, title, body, {
             type: "join",
             roomId: roomId,
             memberId: memberId,
         });
+
+        // 2. フォロワーへ通知
+        const followersSnap = await db.ref(`followers/${memberId}`).once("value");
+        const followersData = followersSnap.val();
+        if (!followersData) return null;
+
+        const followerIds = Object.keys(followersData).filter(id => followersData[id] === true);
+        if (followerIds.length === 0) return null;
+
+        const followerTitle = `${memberName}さんが入室しました！`;
+        const followerBody = `${roomName}ルームでお話しませんか？`;
+        
+        const tokensToSend = [];
+        const tokenUserMap = {};
+        
+        const tokenPromises = followerIds.map(async (followerId) => {
+            const tokenSnap = await db.ref(`fcm_tokens/${followerId}`).once("value");
+            const tokenData = tokenSnap.val();
+            if (tokenData && tokenData.token) {
+                // 既に同室にいるフォロワーには送らない（重複防止）
+                const inRoomSnap = await db.ref(`rooms/${roomId}/members/${followerId}`).once("value");
+                if (!inRoomSnap.exists()) {
+                    tokensToSend.push(tokenData.token);
+                    tokenUserMap[tokenData.token] = followerId;
+                }
+            }
+        });
+        
+        await Promise.all(tokenPromises);
+        
+        if (tokensToSend.length === 0) return null;
+        
+        const message = {
+            notification: { title: followerTitle, body: followerBody },
+            data: { type: "follow_join", roomId: roomId, memberId: memberId, title: followerTitle, body: followerBody },
+            tokens: tokensToSend,
+        };
+        
+        try {
+            const response = await messaging.sendEachForMulticast(message);
+            console.log(`[Followers of ${memberId}] Sent: ${response.successCount} success, ${response.failureCount} failure`);
+            
+            if (response.failureCount > 0) {
+                const invalidTokens = [];
+                response.responses.forEach((resp, idx) => {
+                    if (!resp.success) {
+                        const errorCode = resp.error?.code;
+                        if (errorCode === "messaging/invalid-registration-token" || errorCode === "messaging/registration-token-not-registered") {
+                            invalidTokens.push(tokensToSend[idx]);
+                        }
+                    }
+                });
+                
+                const deletePromises = invalidTokens.map((token) => {
+                    const userId = tokenUserMap[token];
+                    if (userId) return db.ref(`fcm_tokens/${userId}`).remove();
+                    return Promise.resolve();
+                });
+                await Promise.all(deletePromises);
+            }
+        } catch (error) {
+            console.error("Error sending to followers:", error);
+        }
+
+        return null;
     });

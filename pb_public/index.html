@@ -17,6 +17,13 @@
         content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 
     <title>paka-paka - リアルタイムチャット</title>
+    <meta name="description" content="paka-pakaは、アカウント登録不要で誰でも気軽に参加できるリアルタイムチャットコミュニティです。ゲーム、アニメ、映画など、多彩な部屋で会話を楽しめます。">
+    <meta property="og:title" content="paka-paka - リアルタイムチャット">
+    <meta property="og:description" content="paka-pakaは、アカウント登録不要で誰でも気軽に参加できるリアルタイムチャットコミュニティです。">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://jabee-works.github.io/paka-paka/">
+    <meta property="og:image" content="https://jabee-works.github.io/paka-paka/icon.svg">
+    <meta name="twitter:card" content="summary">
 
     <!-- PWA / Icons -->
     <link rel="icon" href="./icon.svg" type="image/svg+xml">
@@ -650,11 +657,54 @@
         };
 
         // 3. User Profile Modal
-        const UserProfileModal = ({ user, onClose }) => {
+        const UserProfileModal = ({ user, currentUser, onClose }) => {
             const userName = user.name || user.user_name;
             const userIcon = user.icon || user.user_icon;
             const userColor = user.color || user.user_color;
             const userBio = user.bio || user.user_bio;
+            const targetUserId = user.id || user.user_id;
+
+            const [isFollowing, setIsFollowing] = useState(false);
+            const [isFollowLoading, setIsFollowLoading] = useState(true);
+
+            useEffect(() => {
+                if (!currentUser || !currentUser.id || !targetUserId) {
+                    setIsFollowLoading(false);
+                    return;
+                }
+                const ref = firebase.database().ref(`following/${currentUser.id}/${targetUserId}`);
+                ref.once('value').then(snap => {
+                    setIsFollowing(!!snap.val());
+                    setIsFollowLoading(false);
+                }).catch(e => {
+                    console.error("Follow status fetch error:", e);
+                    setIsFollowLoading(false);
+                });
+            }, [currentUser, targetUserId]);
+
+            const handleToggleFollow = async () => {
+                if (!currentUser || !currentUser.id || !targetUserId) return;
+                setIsFollowLoading(true);
+                try {
+                    const rtdb = firebase.database();
+                    const updates = {};
+                    if (isFollowing) {
+                        updates[`following/${currentUser.id}/${targetUserId}`] = null;
+                        updates[`followers/${targetUserId}/${currentUser.id}`] = null;
+                    } else {
+                        updates[`following/${currentUser.id}/${targetUserId}`] = true;
+                        updates[`followers/${targetUserId}/${currentUser.id}`] = true;
+                    }
+                    await rtdb.ref().update(updates);
+                    setIsFollowing(!isFollowing);
+                } catch (e) {
+                    console.error("Follow error:", e);
+                } finally {
+                    setIsFollowLoading(false);
+                }
+            };
+
+            const isSelf = currentUser && targetUserId === currentUser.id;
 
             return (
                 <div className="fixed inset-0 z-[110] bg-black/60 backdrop-blur-sm flex items-center justify-center animate-fade-in" onClick={onClose}>
@@ -672,6 +722,17 @@
                             <p className="text-text-sub text-xs mb-2 uppercase font-bold">自己紹介</p>
                             <p className="text-text-main whitespace-pre-wrap">{userBio || '自己紹介文は設定されていません。'}</p>
                         </div>
+                        {!isSelf && currentUser && targetUserId && (
+                            <div className="mt-6 flex justify-center">
+                                <button
+                                    onClick={handleToggleFollow}
+                                    disabled={isFollowLoading}
+                                    className={`w-full py-3 rounded-xl font-bold transition-all ${isFollowLoading ? 'opacity-50 cursor-not-allowed' : ''} ${isFollowing ? 'bg-bg-input text-text-sub border border-border-main hover:bg-bg-main' : 'bg-theme text-white hover:brightness-110 shadow-lg shadow-theme/30'}`}
+                                >
+                                    {isFollowLoading ? '...' : isFollowing ? 'フォロー中' : 'フォローする'}
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </div>
             );
@@ -921,6 +982,7 @@
 
             const handleUserClick = (u) => {
                 setSelectedUser({
+                    user_id: u.user_id,
                     user_name: u.user_name,
                     user_icon: u.user_icon,
                     user_color: u.user_color,
@@ -1054,7 +1116,7 @@
                         )
                     }
 
-                    {selectedUser && <UserProfileModal user={selectedUser} onClose={() => setSelectedUser(null)} />}
+                    {selectedUser && <UserProfileModal user={selectedUser} currentUser={profile} onClose={() => setSelectedUser(null)} />}
                 </div>
             );
         };
@@ -1231,7 +1293,7 @@
                                             <div className="p-4 text-center text-text-sub text-sm">誰もいません</div>
                                         ) : (
                                             viewingRoomMembers.members.map(m => (
-                                                <div key={m.user_id} className="flex items-center p-3 hover:bg-bg-input rounded-xl cursor-pointer transition-colors" onClick={() => { setSelectedUser({ user_name: m.user_name, user_icon: m.user_icon, user_color: m.user_color, user_bio: m.user_bio }); }}>
+                                                <div key={m.user_id} className="flex items-center p-3 hover:bg-bg-input rounded-xl cursor-pointer transition-colors" onClick={() => { setSelectedUser({ user_id: m.user_id, user_name: m.user_name, user_icon: m.user_icon, user_color: m.user_color, user_bio: m.user_bio }); }}>
                                                     <div className="w-10 h-10 rounded-full flex items-center justify-center text-xl border border-border-main overflow-hidden bg-bg-panel" style={{ borderColor: m.user_color }}>
                                                         <span style={{ color: m.user_color }}>{m.user_icon || (m.user_name || '?')[0]}</span>
                                                     </div>
@@ -1248,7 +1310,7 @@
                         )
                     }
 
-                    {selectedUser && <UserProfileModal user={selectedUser} onClose={() => setSelectedUser(null)} />}
+                    {selectedUser && <UserProfileModal user={selectedUser} currentUser={profile} onClose={() => setSelectedUser(null)} />}
                 </div>
             );
         };
