@@ -1149,8 +1149,8 @@
                                         const stats = roomStats[room.id] || { count: 0, users: [] };
                                         return (
                                             <div key={room.id} onClick={() => handleEnterRoom(room)} className={`relative group cursor-pointer overflow-hidden rounded-2xl bg-bg-panel border border-border-main transition-all duration-300 active:scale-[0.98] ${stats.count >= 10 ? 'opacity-50' : 'hover:border-theme'}`}>
-                                                <div className="absolute inset-0 bg-gradient-to-r from-theme to-transparent opacity-0 group-hover:opacity-5 transition-opacity"></div>
-                                                <div className="p-5">
+                                                <div className="absolute inset-0 bg-gradient-to-r from-theme to-transparent opacity-0 group-hover:opacity-5 transition-opacity pointer-events-none"></div>
+                                                <div className="p-5 relative z-10">
                                                     <div className="flex items-center justify-between mb-3">
                                                         <div className="flex items-center space-x-4">
                                                             <div className="p-3 rounded-xl bg-bg-input text-theme border border-border-main"><Icon size={24} /></div>
@@ -1160,18 +1160,29 @@
                                                             </div>
                                                         </div>
                                                         <button 
+                                                            type="button"
                                                             onClick={(e) => {
+                                                                e.preventDefault();
                                                                 e.stopPropagation();
+                                                                e.nativeEvent.stopImmediatePropagation();
                                                                 setViewingRoomMembers({ room, members: stats.allUsers || [] });
                                                             }}
-                                                            className="p-2 rounded-full bg-bg-input border border-border-main text-text-sub hover:text-theme hover:border-theme transition-all"
+                                                            className="p-2 rounded-full bg-bg-input border border-border-main text-text-sub hover:text-theme hover:border-theme transition-all relative z-20"
                                                             title="参加者を見る"
                                                         >
                                                             <LucideIcons.Users size={20} />
                                                         </button>
                                                     </div>
                                                     <div className="flex justify-between items-end border-t border-border-main pt-3 mt-2">
-                                                        <div className="flex -space-x-2">
+                                                        <div 
+                                                            className="flex -space-x-2 cursor-pointer hover:opacity-80 transition-opacity"
+                                                            onClick={(e) => {
+                                                                e.preventDefault();
+                                                                e.stopPropagation();
+                                                                setViewingRoomMembers({ room, members: stats.allUsers || [] });
+                                                            }}
+                                                            title="参加者を見る"
+                                                        >
                                                             {stats.users.map((u, idx) => {
                                                                 return (
                                                                     <div key={idx} className="w-6 h-6 rounded-full border border-bg-main bg-bg-input flex items-center justify-center overflow-hidden text-[10px] font-bold relative z-10" style={{ borderColor: u.user_color }}>
