@@ -112,6 +112,10 @@ exports.onNewMessage = functions.database
     .ref("/rooms/{roomId}/messages/{messageId}")
     .onCreate(async (snapshot, context) => {
         const { roomId } = context.params;
+        
+        // 掲示板（general）は通知対象外
+        if (roomId === 'general') return null;
+
         const messageData = snapshot.val();
 
         if (!messageData) return null;
@@ -139,6 +143,10 @@ exports.onMemberJoin = functions.database
     .ref("/rooms/{roomId}/members/{memberId}")
     .onCreate(async (snapshot, context) => {
         const { roomId, memberId } = context.params;
+        
+        // 掲示板（general）は通知対象外
+        if (roomId === 'general') return null;
+
         const memberData = snapshot.val();
 
         if (!memberData) return null;
